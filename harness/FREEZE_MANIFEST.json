@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "version": "V8-typescript-0.8.0",
+  "status": "owner-approved-design-freeze; source-port-verified; backend-integration-not-enabled",
+  "owner": "Software Engineer 1 / human project owner",
+  "scope": "Bounded JavaScript code repair and small function implementation; strict TypeScript runtime port",
+  "branch": "feature/harness",
+  "approvals": {
+    "designFreeze": true,
+    "typescriptTransfer": true,
+    "localAtomicCommits": true,
+    "push": false,
+    "merge": false,
+    "deployment": false
+  },
+  "originalReference": {
+    "directory": "Pear/harness",
+    "runId": "v8-sol6-docker-20261017-a",
+    "historicalSnapshotStatus": "awaiting_human_freeze_review; later approved in this conversation",
+    "sha256": {
+      "src/v8-executor.mjs": "ff806a803be461b7115ac2b3eba98e7fdf5a1324903e421c7c12a3764083db70",
+      "src/v7-executor.mjs": "5c458303e10a2b8a4f9f3a92233344998e47cff4dae1a8240c6d1f62ae9cb6e4",
+      "src/master-tool-0.mjs": "7d71310cfab716d058f0d74c40cf944af2780b9ad6888adba4b8a8f5bf6c5591",
+      "src/master-tool-1.mjs": "65fcc0df69b0391a52115a6e13924b5e73adfa5928bfe31ffcd9de55af605c1d",
+      "src/registry.mjs": "94094fc14b52994df94b578a210dd0a0b6db53e0db7bc268d73b829787e27eb4",
+      "src/adaptive-checkpoint.mjs": "97db3116497b4793113b02ef82ed28995023531cab5905057e5c46d4ec518c0c",
+      "src/sandbox-tools.mjs": "fbfc1eabf56d5aa762732d591930b046ff68ee04f0200fc31ba633048a335f1f",
+      "src/canonical.mjs": "dba57f3c0dc717a8d7681dfe8daa208eba704da351587db5cab5a5d21ffaaa74",
+      "src/openai-response-client.mjs": "6ef99c0375d9da64dd9f57929982bcb809f075ed635a2227217943a907ad2fe1",
+      "src/codex-runner.mjs": "ba4e523ff27cf811897045b16e8417f58a42b28a12a4169d8f0adf43c0ac55f9",
+      "src/benchmark-environment.mjs": "192ddc61aaafba0602754ffc722d3d981deb82283a7e2df6c09f7177a936cdf4",
+      "src/v8-gateway.mjs": "ebfc502d5db51f4d96a0c149515a6d9d6ae385e7bc7f602e961b1b612dfca6e7",
+      "src/v5-meter.mjs": "5e93a2ea799b9339303bfe3050901480651dc90c2bd34bf0cd9c90bdbfd779d4",
+      "benchmarks/V3_GATE_CONFIG.json": "25b45139e065269dabca5132c5defb743afb26b1998573bac64f0a195b45477c",
+      "benchmarks/V4_ROUTE_HISTORY.json": "0d61eaa0a726cf0a8d74965f3cca9bc5e516de71559582ff86aa26103caada7d",
+      "V8_FREEZE_CANDIDATE.json": "045a7a598a7f913e9562dbdbe6cbc00b65811e317415968888397ef34e52cf16",
+      ".v8-prep/container-worker.mjs": "3863b303b8617dcda26a087843a1f793aaec5039aedfed08389bf47ad3cb3771"
+    }
+  },
+  "lowLevelDesign": {
+    "file": "SwampHacks/Updated_SwampHacks_LowLevel_Design.excalidraw",
+    "sha256": "3dfecd60719ab8308533cb171e82df5cf7e1cf7a0aa73c16b43e8929b57ecf8e",
+    "relevantSections": [
+      "1: plan/acquire/select/route/execute",
+      "2: availability and approval",
+      "7: owner sandbox",
+      "8–9: run state and events"
+    ],
+    "acceptedOverrides": [
+      "Direct DAG uses deterministic node argument/data resolution, not per-node LLM filling",
+      "V8 margin >= 0.30 replaces placeholder confidence gate",
+      "One bounded read-only expansion and reassessment before continued-uncertainty approval"
+    ]
+  },
+  "inspectedLocalRefs": {
+    "main": "356d05363237d2d79e2017fd09ff66c2630055a2",
+    "backend": "515982d20ad3fda5a3297c5604e0a5c5d591fa3e",
+    "swe2": "9a53caf2333e8312a3e7878158c6041cc917941a",
+    "swe2IsAncestorOfMain": true,
+    "remoteFetchPerformed": false
+  },
+  "gate": {
+    "confidenceThreshold": 0,
+    "minMargin": 0.3
+  },
+  "coding": {
+    "model": "gpt-6-sol",
+    "effort": "medium"
+  },
+  "synthesis": {
+    "maxOutputTokens": 8192,
+    "changeContract": true,
+    "responsePhasePolicy": "final-answer"
+  },
+  "recovery": {
+    "maxFiles": 12,
+    "maxChars": 24000,
+    "maxMs": 10000
+  },
+  "recoveryPolicy": {
+    "maxExpansions": 1,
+    "maxReassessments": 1,
+    "dependencyRadius": 2,
+    "timeBudget": "checked elapsed time, not hard cancellation"
+  },
+  "providers": {
+    "primary": "Decisions",
+    "availabilityBackup": "Jev",
+    "backupOnUncertainty": false
+  },
+  "historyPolicy": "V4 offline priors frozen before evaluation; no current-run learning",
+  "verificationAcceptance": {
+    "strictTypecheck": true,
+    "unitTests": 33,
+    "offlineReferenceChecks": 7,
+    "freezeChecks": 3,
+    "liveProviderCallsDuringTransfer": 0
+  },
+  "excludedFromTransfer": [
+    "credentials and authentication state",
+    "benchmark corpora and hidden answers",
+    "generated results and slides",
+    "Docker/benchmark gateway, meter and CLI launcher",
+    "original Git metadata and caches"
+  ],
+  "integrationStatus": {
+    "backendWired": false,
+    "workspaceLockVersionAdapter": false,
+    "ownerContainerBoundary": false,
+    "sharedContractReconciliation": false,
+    "browserCloudHardwareVerified": false
+  },
+  "hashPolicy": "SHA-256 of UTF-8 text normalized from CRLF to LF; manifest excludes itself. Original provenance hashes are exact-byte SHA-256.",
+  "normalizedLfSha256": {
+    ".gitignore": "81582c44761ed81b9210349e770e55515c9fa96b175c6a2b465f2b1aab0fafc8",
+    "README.md": "2a5d2d87b483b05433e630692f6fc8a3bdd829b9a269ffdd7513cbc6e334df64",
+    "docs/BACKEND_INTEGRATION.md": "a8f3f33540140b0ec32f59867ae7b56a473fbb9ffb153136be7815cc11aa71c7",
+    "docs/FROZEN_DESIGN.md": "bb5be54ba3d59543dbad0ac323e0a779f710ca056b6fd64badeeecf2fdce84fb",
+    "docs/PORT_PLAN.md": "9bbe511557819d59b25a7be90c3797f0c1c7d9f7d0b64d5db0d8ad4948074fe3",
+    "docs/VERIFICATION.md": "3483ca44c7e12811408720f40ed2a99dbd01eceb1d57cfc04d502df813cdc955",
+    "package-lock.json": "390c2de36bc80fc252f5d0f5355ddaf09b6c93f0f1a247331d20c4b747159535",
+    "package.json": "178dfffd2b3740228fec0567e003fc1a4a967ec3cd15d5cdb6ab2568a3e5e351",
+    "src/adaptive-checkpoint.ts": "90b7b911dcfba22597b4dfbd51c20d8f20e8b5533da30a3f12eea9a68d4c6f78",
+    "src/benchmark-environment.ts": "430471408083cdd44a68c09bf21aac0bb153b8ab8337b6ac32bb78f0e5fdc7ac",
+    "src/canonical.ts": "3c473e556f43031985f90b68dabb5101cfd959081ddb70a1c1f55dc83cf2a718",
+    "src/frozen-config.ts": "cb05e6e6bf37b7ebd58d5c9c7b28c47fa3256cc272e96c6019ed5d07c584a652",
+    "src/index.ts": "b697453a53517e2197bc3961d11473effc0bb49db645f6f55a3a5e9f2fd5f33d",
+    "src/master-tool-0.ts": "a27518d2748cbf538b1dfdce1c50009606e847ef2c04d120c9753c5bd760f0db",
+    "src/master-tool-1.ts": "f2a5b9cbdfae66a2f907fea97f2d2d18f8ad467c33a2f64828273e3874f370c2",
+    "src/openai-response-client.ts": "bab22d53bf95e8ff7bec8cbdf79f630d5bfb5b889f11c9cadf229891e38f75a8",
+    "src/registry.ts": "cce1621a5e55b1d737cc06e579707b884bcf3466487957b2019ac0a67ee9c7d2",
+    "src/sandbox-tools.ts": "6495d039b9b615d7ab3bf1b2bb3a3518d9c402e67d4fc16b3f6b0467458b60a9",
+    "src/types.ts": "13879d7bbf43aad072eca088f389160e27478e3c91bfe32535b66ee6d20ed2c6",
+    "src/v7-executor.ts": "8337297ca1386727e0d8e5bc246cce3974822eae979e5b624aab08c81b2b902f",
+    "src/v8-executor.ts": "e819eb533163860f229211e854c7fb7d27c4cf53e19413e7b87a705e4b853778",
+    "test/executor-runtime.test.ts": "00e370eabdf74e97fd2b9384a67e5e22c3df3b7f457f81159ee8c72163e60faa",
+    "test/freeze-manifest.check.ts": "130c060ddbc42047ace5b9d5ae65d5eff1a5cebd1d0dcc758628ba4d23b78817",
+    "test/frozen-config.test.ts": "7d06bb826ad5835b543abae824dc9d385c78f15c6f1ba380b2d209d762dcf25c",
+    "test/frozen-parity.check.ts": "ca94b934c8a307d7d3eb225cae5f2df25f7c69bd5d5bee287cb5da4a37a2345e",
+    "test/master-tool-0.test.ts": "a3cf47ef4aa0b83fb7a8c245ac7bc6ece7d444ad3f758345f95b4e9752275b63",
+    "test/master-tool-1.test.ts": "7d4ac0143ad17cee19752d1491ad597daad336b9c5409f9fde3bfa01045a5573",
+    "test/response-phase.test.ts": "015144076402563fb0b0e4c37d517ac4383dbb1f2051b8a111466e001ae35b1f",
+    "test/v8-executor.test.ts": "86fa66db0953477ff78a2bd7ea58574dbb9345d20ef5d2d932bc63f53fc40f1a",
+    "tsconfig.json": "ea6befc86968dd02190574646b1081bb2053bcfde0f6b4d910955a940be39ecb"
+  }
+}

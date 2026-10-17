@@ -1,5 +1,6 @@
-import type { FetchLike, RouteHistory } from "./types.js";
+import type { FetchLike, RouteHistory, Synthesize } from "./types.js";
 import { MasterTool1Router } from "./master-tool-1.js";
+import { synthesizePatch } from "./openai-response-client.js";
 
 export const FROZEN_GATE = Object.freeze({ confidenceThreshold: 0, minMargin: 0.3 });
 export const FROZEN_CODING = Object.freeze({ model: "gpt-6-sol", effort: "medium" });
@@ -21,4 +22,10 @@ export function createFrozenRouter(options: { decisionsApiKey: string; jevApiKey
     cacheTtlMs: 0, maxCalls: 8,
     secondaryProvider: options.jevApiKey ? { mode: "jev", apiKey: options.jevApiKey, timeoutMs: 10000 } : null,
   });
+}
+
+/** Matches the V8 container worker; the generic client retains historical defaults. */
+export function createFrozenSynthesize(options: { apiKey: string; fetchImpl?: FetchLike }): Synthesize {
+  return input => synthesizePatch({ ...input, ...FROZEN_CODING, apiKey: options.apiKey,
+    fetchImpl: options.fetchImpl, changeContract: true, maxOutputTokens: 8192, responsePhasePolicy: "final-answer" });
 }
