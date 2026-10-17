@@ -31,7 +31,24 @@ test("filters with / and opens the first match with Enter", async ({ page }) => 
   await expect(page.getByText("1 match")).toBeVisible();
   await expect(row(page, "src/routes/users.ts").locator("mark")).toHaveText("user");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("main")).toHaveText("src/routes/users.ts");
+  await expect(page.getByRole("tab", { name: "src/routes/users.ts" })).toBeVisible();
+});
+
+test("opening a file loads its contents read-only and switching files swaps them", async ({ page }) => {
+  await page.goto("/?as=alice");
+  await row(page, "src/auth.ts").click();
+  const code = page.locator(".monaco-editor .view-lines");
+  await expect(code).toContainText("currentUser");
+  await expect(page.getByText("v1", { exact: true })).toBeVisible();
+
+  await row(page, "src/db.ts").click();
+  await expect(code).toContainText("rows");
+  await expect(code).not.toContainText("currentUser");
+
+  // Read-only until locks land: typing must not change the buffer.
+  await code.click();
+  await page.keyboard.type("zzz");
+  await expect(code).not.toContainText("zzz");
 });
 
 test("another person's open file shows their avatar on the row", async ({ page, browser }) => {

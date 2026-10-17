@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useSession } from "./auth/AuthGate";
 import { connectWorkspace, type WorkspaceSocket } from "./net/socket";
 import { createWorkspaceStore, useWorkspace } from "./state/workspace";
 import { FileTree } from "./tree/FileTree";
 import { Avatar } from "./ui/Avatar";
 import { ConnectionPill } from "./ui/ConnectionPill";
+
+// Monaco is most of the bundle; load it only once a file is opened.
+const EditorPane = lazy(() => import("./editor/EditorPane"));
 
 // URL shape: /ws/<wsId>/<branch>. Anything else opens the mock's demo workspace.
 function workspaceFromUrl() {
@@ -23,22 +26,22 @@ export function App() {
   const { wsId, branch } = useMemo(workspaceFromUrl, []);
   const store = useMemo(createWorkspaceStore, []);
   const ws = useWorkspace(store);
-  const socketRef = useRef<WorkspaceSocket | null>(null);
+  const [socket, setSocket] = useState<WorkspaceSocket | null>(null);
   const [openPath, setOpenPath] = useState<string | null>(null);
 
   useEffect(() => {
-    const socket = connectWorkspace({ apiUrl: apiUrl(), wsId, branch, getToken: session.getToken, store });
-    socketRef.current = socket;
+    const s = connectWorkspace({ apiUrl: apiUrl(), wsId, branch, getToken: session.getToken, store });
+    setSocket(s);
     return () => {
-      socket.close();
-      socketRef.current = null;
+      s.close();
+      setSocket(null);
     };
   }, [wsId, branch, session, store]);
 
   // Presence is re-sent after every (re)join so other people see what this user has open.
   useEffect(() => {
-    if (ws.connection === "connected") socketRef.current?.emit("presence:update", { openPath });
-  }, [openPath, ws.connection]);
+    if (ws.connection === "connected") socket?.emit("presence:update", { openPath });
+  }, [socket, openPath, ws.connection]);
 
   const others = ws.members.filter((m) => m.userId !== ws.self?.userId);
 
@@ -76,8 +79,14 @@ export function App() {
             onOpen={setOpenPath}
           />
         </nav>
-        <main className="editor-empty">
-          <p>{openPath ? <span className="mono">{openPath}</span> : "Select a file to open it."}</p>
+        <main className="workspace-main">
+          {openPath && socket ? (
+            <Suspense fallback={<p className="editor-note">Starting editor…</p>}>
+              <EditorPane socket={socket} path={openPath} connected={ws.connection === "connected"} />
+            </Suspense>
+          ) : (
+            <p className="editor-note">Select a file to open it.</p>
+          )}
         </main>
       </div>
     </div>

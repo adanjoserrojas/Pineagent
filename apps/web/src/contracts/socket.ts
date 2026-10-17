@@ -27,6 +27,7 @@ export type RoomJoinAck =
 
 export type LockAcquireAck = { ok: true; lock: Lock } | { ok: false; code: "HELD"; lock: Lock };
 export type HeartbeatAck = { ok: true; expired: string[] };
+// PROPOSED: `ok: true` on success so every ack shares one discriminant (the draft omits it).
 export type SnapshotAck =
   | { ok: true; path: string; version: number; content: string; hash: string }
   | { ok: false; code: "NOT_FOUND" };

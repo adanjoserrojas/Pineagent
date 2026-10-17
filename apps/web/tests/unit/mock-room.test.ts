@@ -76,6 +76,22 @@ describe("mock handshake and room:join", () => {
     expect(await updated).toMatchObject({ userId: "dev|hank", status: "updated", openPath: "src/auth.ts" });
   });
 
+  it("serves file snapshots and refuses paths outside the workspace", async () => {
+    const c = client("dev:ivy");
+    await connected(c);
+    expect(await c.emitWithAck("file:snapshot", { path: "src/auth.ts" })).toEqual({ ok: false, code: "NOT_FOUND" }); // not joined
+    await c.emitWithAck("room:join", { wsId: "w5", branch: "main" });
+
+    const res = await c.emitWithAck("file:snapshot", { path: "src/auth.ts" });
+    expect(res.ok && res.version).toBe(1);
+    expect(res.ok && res.content).toContain("export async function currentUser");
+    expect(res.ok && res.hash).toMatch(/^[0-9a-f]{64}$/);
+
+    for (const path of ["../package.json", "src/../../x", "/etc/hosts", "nope.ts", ""]) {
+      expect(await c.emitWithAck("file:snapshot", { path })).toEqual({ ok: false, code: "NOT_FOUND" });
+    }
+  });
+
   it("keeps branches in separate rooms", async () => {
     const a = client("dev:erin");
     const b = client("dev:frank");

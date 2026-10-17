@@ -1,11 +1,12 @@
 // Mock of SE1's Socket.IO gateway for browser development and e2e tests.
 // Implements docs/contracts/SOCKET_LOCKS_AND_FILES.md in memory. NOT the real server:
 // it accepts `dev:<name>` tokens, which the real API must reject.
-import { cp, mkdtemp, readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { cp, mkdtemp, readFile, readdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { Server, type Socket } from "socket.io";
@@ -73,10 +74,20 @@ async function verifyAuth0(token: string): Promise<User | null> {
 
 const presenceOf = (user: User) => ({ userId: user.id, name: user.name, avatarUrl: user.avatarUrl });
 
+// Resolves a repo-relative path inside the workspace copy; null for anything that escapes it.
+function inWorkspace(root: string, path: unknown): string | null {
+  if (typeof path !== "string" || path === "" || path.startsWith("/") || path.includes("\0")) return null;
+  const full = resolve(root, path);
+  return full.startsWith(root + sep) ? full : null;
+}
+
 export async function startMock({ port = 3001 }: { port?: number } = {}) {
   // Each mock instance edits its own temp copy of the fixture, so tests never touch the source tree.
   const root = await mkdtemp(join(tmpdir(), "pineagent-mock-"));
   await cp(FIXTURE, root, { recursive: true });
+
+  // File versions; edits (M4) will bump these. Every file starts at version 1.
+  const versions = new Map<string, number>();
 
   const http = createServer();
   const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(http, {
@@ -116,6 +127,18 @@ export async function startMock({ port = 3001 }: { port?: number } = {}) {
       const self: Member = { userId: user.id, name: user.name, avatarUrl: user.avatarUrl, openPath: socket.data.openPath };
       ack({ ok: true, self, members: await membersOf(room), locks: [], tree: await listFiles(root) });
       socket.to(room).emit("presence:changed", { ...presenceOf(user), status: "joined", openPath: self.openPath });
+    });
+
+    socket.on("file:snapshot", async ({ path }, ack) => {
+      const full = socket.data.room ? inWorkspace(root, path) : null;
+      if (!full) return ack({ ok: false, code: "NOT_FOUND" });
+      try {
+        const content = await readFile(full, "utf8");
+        const hash = createHash("sha256").update(content).digest("hex");
+        ack({ ok: true, path, version: versions.get(path) ?? 1, content, hash });
+      } catch {
+        ack({ ok: false, code: "NOT_FOUND" });
+      }
     });
 
     socket.on("presence:update", ({ openPath }) => {
