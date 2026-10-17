@@ -59,7 +59,7 @@ describe("happy path", () => {
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
     expect(new Set(seqs).size).toBe(seqs.length);
     expect(events.every((e) => e.run.seq === e.seq && e.run.state === e.state)).toBe(true);
-    expect(runOf(id)).toMatchObject({ routerMode: "jev", writeSet: ["src/auth.ts"] });
+    expect(runOf(id)).toMatchObject({ routerMode: "openai", codingRecovery: "none", writeSet: ["src/auth.ts"] });
   });
 
   it("really edits the file under a run lock, then releases it; the edit counts as the owner's", async () => {
@@ -87,7 +87,27 @@ describe("router modes", () => {
     await until(b, "done");
     const c = startRun(ALICE, "same task");
     await until(c, "done");
-    expect([runOf(b).routerMode, runOf(c).routerMode]).toEqual(["jev", "cache"]);
+    expect([runOf(b).routerMode, runOf(c).routerMode]).toEqual(["openai", "cache"]);
+  });
+});
+
+describe("routing versus coding recovery (contracts/RUN_EVENTS.md)", () => {
+  it("Jev scores only when Decisions can't, and that is a router mode, not recovery", async () => {
+    const id = startRun(ALICE, "backup scorer please");
+    await until(id, "done");
+    expect(runOf(id)).toMatchObject({ routerMode: "jev", codingRecovery: "none" });
+  });
+
+  it("a failed step hands over to a warm coding agent without changing the router mode", async () => {
+    const id = startRun(ALICE, "recover from a bad step");
+    await until(id, "done");
+    expect(runOf(id)).toMatchObject({ routerMode: "openai", codingRecovery: "warm_agent" });
+    // The top-level field and the snapshot agree on every event, and the change got its own seq.
+    const mine = events.filter((e) => e.runId === id);
+    expect(mine.every((e) => e.codingRecovery === e.run.codingRecovery && e.routerMode === e.run.routerMode)).toBe(true);
+    const flip = mine.findIndex((e) => e.codingRecovery === "warm_agent");
+    expect(flip).toBeGreaterThan(0);
+    expect(mine[flip].seq).toBe(mine[flip - 1].seq + 1);
   });
 });
 

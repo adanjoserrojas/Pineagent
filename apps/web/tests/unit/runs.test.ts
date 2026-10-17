@@ -9,7 +9,7 @@ let n = 0;
 function run(patch: Partial<RunView> = {}): RunView {
   n++;
   return {
-    runId: `r${n}`, ownerId: ME, ownerName: "me", task: "t", state: "executing", routerMode: "jev", nodeIndex: 0,
+    runId: `r${n}`, ownerId: ME, ownerName: "me", task: "t", state: "executing", routerMode: "openai", nodeIndex: 0,
     seq: 1, steps: [], writeSet: [], startedAt: NOW - 10_000 + n, ...patch,
   };
 }
@@ -55,6 +55,7 @@ describe("what the plant shows", () => {
   });
 
   it("routing shows the router mode: cache and LLM fallback have their own faces", () => {
+    expect(face([run({ state: "routing", routerMode: "openai" })])).toBe("routing");
     expect(face([run({ state: "routing", routerMode: "jev" })])).toBe("routing");
     expect(face([run({ state: "routing", routerMode: "cache" })])).toBe("routing_cache");
     expect(face([run({ state: "routing", routerMode: "llm" })])).toBe("routing_llm");

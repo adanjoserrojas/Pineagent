@@ -50,7 +50,7 @@ test("a run goes planning → routing → executing → done, and the plant foll
   await startRun(alice, "add a test for currentUser");
   await expect(card(alice).getByTestId("run-state")).toHaveText("done");
   await expect(card(alice).locator(".run-step-done")).toHaveCount(3);
-  await expect(card(alice).getByTestId("router-mode")).toHaveText("router: Jev");
+  await expect(card(alice).getByTestId("router-mode")).toHaveText("router: OpenAI Decisions");
 
   const seen = await faces(alice);
   const order = ["planning", "routing", "executing", "done"].map((f) => seen.indexOf(f));
@@ -105,6 +105,19 @@ test("when the scorer is down the run falls back to the LLM, with a badge and th
   await expect(card(alice).getByTestId("router-mode")).toHaveText("router: LLM fallback");
   await expect(card(alice).getByTestId("run-state")).toHaveText("done");
   expect(await faces(alice)).toContain("routing_llm");
+});
+
+test("Jev failover and warm coding recovery show as separate badges", async ({ browser }) => {
+  const alice = await joinAs(browser, "alice");
+  await startRun(alice, "backup: tidy db.ts");
+  await expect(card(alice).getByTestId("run-state")).toHaveText("done");
+  await expect(card(alice).getByTestId("router-mode")).toHaveText("router: Jev (backup scorer)");
+  await expect(card(alice).getByTestId("coding-recovery")).toHaveCount(0);
+
+  await startRun(alice, "recover: tidy auth.ts");
+  await expect(card(alice).getByTestId("run-state")).toHaveText("done");
+  await expect(card(alice).getByTestId("router-mode")).toHaveText("router: OpenAI Decisions");
+  await expect(card(alice).getByTestId("coding-recovery")).toHaveText("coding recovery: warm agent");
 });
 
 test("a failing step shows the error on the card and the plant", async ({ browser }) => {

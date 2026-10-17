@@ -4,7 +4,9 @@
 // It follows the real pipeline's shape: plan → lock the whole writeSet (or wait, blocked) → route
 // → maybe ask for approval → execute steps → done/error. Words in the task pick the demo path:
 //   "unsure"   low confidence: wait for the owner to pick one of 3 plans (or "none of these")
-//   "fallback" scorer down: router mode llm
+//   "backup"   OpenAI Decisions can't score: Jev scores instead (router mode jev)
+//   "fallback" no scorer at all: router mode llm (step-by-step LLM routing)
+//   "recover"  the second step fails verification; a warm coding agent continues (codingRecovery)
 //   "fail"     the second step fails
 //   same task twice → router mode cache
 // The run really locks its file and edits it, so the explorer, the editor and the commit dialog
@@ -53,6 +55,7 @@ export class MockHarness implements Harness {
         task: task.trim(),
         state: "planning",
         routerMode: null,
+        codingRecovery: "none",
         nodeIndex: -1,
         seq: 0,
         steps: [],
@@ -121,7 +124,14 @@ export class MockHarness implements Harness {
     if (!(await this.acquire(run))) return;
 
     // 3-4 SELECT + ROUTE.
-    const mode: RouterMode = task.includes("fallback") ? "llm" : this.routedBefore.has(task) ? "cache" : "jev";
+    // OpenAI Decisions is the primary scorer; Jev only covers for it (contracts/RUN_EVENTS.md).
+    const mode: RouterMode = task.includes("fallback")
+      ? "llm"
+      : this.routedBefore.has(task)
+        ? "cache"
+        : task.includes("backup")
+          ? "jev"
+          : "openai";
     this.routedBefore.add(task);
     this.update(run, { state: "routing", routerMode: mode });
     await this.sleep();
@@ -160,6 +170,12 @@ export class MockHarness implements Harness {
       if (this.closed) return;
       if (task.includes("fail") && i === 1) {
         return this.fail(run, i, `${steps[i].tool} failed twice (replanned once from this step)`);
+      }
+      if (task.includes("recover") && i === 1 && run.view.codingRecovery === "none") {
+        // The DAG's step failed verification: a coding agent picks up the same working tree.
+        // This changes codingRecovery only; the router mode stays what scoring chose.
+        this.update(run, { codingRecovery: "warm_agent" });
+        await this.sleep();
       }
       for (const path of steps[i].writes) await this.edit(run, path, i);
     }
@@ -223,6 +239,7 @@ export class MockHarness implements Harness {
       seq: v.seq,
       state: v.state,
       routerMode: v.routerMode,
+      codingRecovery: v.codingRecovery,
       nodeIndex: v.nodeIndex,
       ts: Date.now(),
       run: v,

@@ -8,7 +8,8 @@ The minimum fields fixed in `PROJECT_MEMORY.md`, plus a full `run` snapshot (PRO
 
 ```ts
 type RunState = "planning" | "routing" | "awaiting_approval" | "blocked" | "executing" | "paused" | "error" | "done";
-type RouterMode = "jev" | "cache" | "llm";
+type RouterMode = "openai" | "jev" | "cache" | "llm";
+type CodingRecovery = "none" | "warm_agent";
 
 type RunEvent = {
   runId: string;
@@ -17,6 +18,7 @@ type RunEvent = {
   seq: number;              // monotonic per run; consumers drop seq <= last seen
   state: RunState;
   routerMode: RouterMode | null;   // null until routing has picked a mode
+  codingRecovery?: CodingRecovery; // PROPOSED: optional for the existing mock; real backend emits it
   nodeIndex: number;        // current step, -1 before executing
   ts: number;
   run: RunView;             // PROPOSED: full snapshot after this event
@@ -27,7 +29,8 @@ type RunCandidate = { id: string; score: number; steps: RunStep[] };
 
 type RunView = {
   runId: string; ownerId: string; ownerName: string; task: string;
-  state: RunState; routerMode: RouterMode | null; nodeIndex: number; seq: number;
+  state: RunState; routerMode: RouterMode | null; codingRecovery?: CodingRecovery;
+  nodeIndex: number; seq: number;
   steps: RunStep[];                 // the chosen DAG in execution order; [] until routed
   candidates?: RunCandidate[];      // only while awaiting_approval (top 3)
   confidence?: number;              // top candidate's score
@@ -37,6 +40,12 @@ type RunView = {
   startedAt: number; endedAt?: number;
 };
 ```
+
+### Routing versus coding recovery
+
+OpenAI Decisions is the primary Master-1 scorer (`routerMode: "openai"`, matching the current harness adapter). Jev is an **availability backup** when Decisions cannot score, including rate limits or exhausted quota (`routerMode: "jev"`). `cache` means a previously scored route was reused; `llm` means scoring is unavailable or the approval path switches to the step-by-step LLM router. Low confidence by itself pauses for approval; it does not imply a Jev failover.
+
+`codingRecovery` is independent of `routerMode`. It starts as `none` and becomes `warm_agent` only if the selected DAG fails visible verification and a coding agent continues from its existing working tree and evidence. A run can therefore have both `routerMode: "jev"` and `codingRecovery: "warm_agent"`. Do not report coding recovery as `routerMode: "llm"`, and do not report a Jev scorer failover as coding recovery. The backend increments `seq` and emits a new `run:event` when either value changes; the top-level value and `run` snapshot must agree. This field remains optional in the draft TypeScript mirror so SWE 2's current mock stays compatible; the real backend should always include it before interface freeze.
 
 ## Events
 
@@ -53,7 +62,7 @@ type RunView = {
 1. Keep one `RunView` per run; replace it only when `seq` is greater than the stored one.
 2. The plant shows the signed-in user's highest-priority run: `error > awaiting_approval > blocked > executing > routing > planning > done > idle`. `paused` shows as the firmware's `paused` face; `done` shows for a few seconds, then `idle`.
 3. On reconnect (socket or plant), fetch `run:list` and re-send the current plant state.
-4. Router mode `llm` shows the fallback badge; `cache` shows the cache badge (LLD 2).
+4. `routerMode: "openai"` displays Decisions; `jev` identifies scorer-provider failover; `cache` identifies route reuse; `llm` identifies step-by-step routing fallback. A warm coding-recovery indicator, if shown, uses `codingRecovery` instead of `routerMode`.
 
 ## Firmware face names
 

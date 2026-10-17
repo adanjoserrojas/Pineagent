@@ -19,7 +19,13 @@ const STATE_LABEL: Record<RunState, string> = {
   error: "failed",
   done: "done",
 };
-const ROUTER_LABEL: Record<RouterMode, string> = { jev: "router: Jev", cache: "router: cache", llm: "router: LLM fallback" };
+// contracts/RUN_EVENTS.md rule 4: Decisions is the normal case; Jev means the scorer failed over.
+const ROUTER_LABEL: Record<RouterMode, string> = {
+  openai: "router: OpenAI Decisions",
+  jev: "router: Jev (backup scorer)",
+  cache: "router: cache",
+  llm: "router: LLM fallback",
+};
 const PAUSABLE = new Set<RunState>(["planning", "routing", "blocked", "executing"]);
 
 type Props = {
@@ -91,7 +97,7 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
         />
         {DEV_TOOLS && (
           <p className="run-hint">
-            Mock agent: include <code>unsure</code>, <code>fallback</code> or <code>fail</code>, or a file name like <code>db.ts</code>.
+            Mock agent: include <code>unsure</code>, <code>backup</code>, <code>fallback</code>, <code>recover</code> or <code>fail</code>, or a file name like <code>db.ts</code>.
           </p>
         )}
         <button type="submit" className="btn-primary" disabled={!connected || starting || !task.trim()}>
@@ -172,8 +178,14 @@ function RunCard({
 
       <div className="run-badges">
         {run.routerMode && (
-          <span className={`run-badge${run.routerMode === "llm" ? " run-badge-warn" : ""}`} data-testid="router-mode">
+          <span className={`run-badge${run.routerMode === "llm" || run.routerMode === "jev" ? " run-badge-warn" : ""}`} data-testid="router-mode">
             {ROUTER_LABEL[run.routerMode]}
+          </span>
+        )}
+        {/* Independent of routing: a coding agent took over after a step failed verification. */}
+        {run.codingRecovery === "warm_agent" && (
+          <span className="run-badge run-badge-warn" data-testid="coding-recovery">
+            coding recovery: warm agent
           </span>
         )}
         {run.writeSet.map((p) => (
