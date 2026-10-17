@@ -5,6 +5,7 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
 export type Session = {
   displayName: string;
   getToken: () => Promise<string>;
+  signIn: () => void; // a fresh sign-in, e.g. after the server rejected the token
   signOut: () => void;
 };
 
@@ -52,7 +53,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 function DevSession({ children }: { children: ReactNode }) {
   const name = new URLSearchParams(window.location.search).get("as") ?? "alice";
   const session = useMemo<Session>(
-    () => ({ displayName: name, getToken: async () => `dev:${name}`, signOut: () => {} }),
+    () => ({ displayName: name, getToken: async () => `dev:${name}`, signIn: () => window.location.reload(), signOut: () => {} }),
     [name],
   );
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;
@@ -75,10 +76,11 @@ function Auth0Session({ children }: { children: ReactNode }) {
               if (!token) throw new Error("Auth0 returned no token");
               return token;
             },
+            signIn: () => loginWithRedirect({ appState: { returnTo: window.location.pathname + window.location.search } }),
             signOut: () => logout({ logoutParams: { returnTo: window.location.origin } }),
           }
         : null,
-    [isAuthenticated, user, getAccessTokenSilently, getIdTokenClaims, logout],
+    [isAuthenticated, user, getAccessTokenSilently, getIdTokenClaims, loginWithRedirect, logout],
   );
 
   if (isLoading) return <p className="center-note">Signing in…</p>;

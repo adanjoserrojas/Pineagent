@@ -87,7 +87,7 @@ export function App() {
             </li>
           ))}
         </ul>
-        <ConnectionPill status={ws.connection} />
+        <ConnectionPill status={ws.connection} onSignIn={session.signIn} />
         <button
           type="button"
           className="topbar-btn"
