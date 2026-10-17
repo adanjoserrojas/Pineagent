@@ -7,9 +7,11 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { Server, type Socket } from "socket.io";
 import {
   UNAUTHENTICATED,
+  githubAvatarUrl,
   roomName,
   type ClientToServerEvents,
   type Member,
@@ -33,14 +35,40 @@ async function listFiles(root: string, dir = root): Promise<string[]> {
   return out.sort();
 }
 
-// The real server takes avatarUrl from githubAvatarUrl(sub). Dev names are treated as GitHub
-// logins (?as=octocat shows octocat's picture); MOCK_AVATARS=0 turns that off.
-function authenticate(token: unknown): User | null {
+// Accepts `dev:<name>` tokens and, when VITE_AUTH0_DOMAIN is set, real Auth0 JWTs. Dev names are
+// treated as GitHub logins (?as=octocat shows octocat's picture); MOCK_AVATARS=0 turns that off.
+async function authenticate(token: unknown): Promise<User | null> {
   if (typeof token !== "string") return null;
   const m = token.match(/^dev:([a-z0-9_-]{1,39})$/i);
-  if (!m) return null;
-  const avatarUrl = process.env.MOCK_AVATARS === "0" ? null : `https://github.com/${m[1]}.png?size=64`;
-  return { id: `dev|${m[1].toLowerCase()}`, name: m[1], avatarUrl };
+  if (m) {
+    const avatarUrl = process.env.MOCK_AVATARS === "0" ? null : `https://github.com/${m[1]}.png?size=64`;
+    return { id: `dev|${m[1].toLowerCase()}`, name: m[1], avatarUrl };
+  }
+  return verifyAuth0(token);
+}
+
+let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
+
+// Verifies signature, issuer and audience against the tenant's JWKS. The audience is the API when
+// one is configured, otherwise the SPA client id (the ID token fallback used before the API exists).
+async function verifyAuth0(token: string): Promise<User | null> {
+  const domain = process.env.VITE_AUTH0_DOMAIN;
+  const audience = process.env.VITE_AUTH0_AUDIENCE || process.env.VITE_AUTH0_CLIENT_ID;
+  if (!domain || !audience) return null;
+  jwks ??= createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
+  try {
+    const { payload } = await jwtVerify(token, jwks, { issuer: `https://${domain}/`, audience });
+    const sub = String(payload.sub);
+    const claim = (k: string) => (typeof payload[k] === "string" ? (payload[k] as string) : undefined);
+    return {
+      id: sub,
+      name: claim("nickname") ?? claim("name") ?? sub,
+      avatarUrl: githubAvatarUrl(sub) ?? claim("picture") ?? null,
+    };
+  } catch (err) {
+    console.warn(`[mock] rejected Auth0 token: ${(err as Error).message}`);
+    return null;
+  }
 }
 
 const presenceOf = (user: User) => ({ userId: user.id, name: user.name, avatarUrl: user.avatarUrl });
@@ -55,8 +83,8 @@ export async function startMock({ port = 3001 }: { port?: number } = {}) {
     cors: { origin: ALLOWED_ORIGINS },
   });
 
-  io.use((socket, next) => {
-    const user = authenticate(socket.handshake.auth?.token);
+  io.use(async (socket, next) => {
+    const user = await authenticate(socket.handshake.auth?.token);
     if (!user) {
       const err = new Error("unauthenticated") as Error & { data?: unknown };
       err.data = { code: UNAUTHENTICATED };
@@ -117,5 +145,12 @@ export async function startMock({ port = 3001 }: { port?: number } = {}) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // Share the browser's Auth0 settings; already-set environment variables win.
+  try {
+    process.loadEnvFile(fileURLToPath(new URL("../.env.local", import.meta.url)));
+  } catch {
+    // No .env.local: dev tokens only.
+  }
+  console.log(`[mock] Auth0 verification ${process.env.VITE_AUTH0_DOMAIN ? "on" : "off"}`);
   startMock({ port: Number(process.env.MOCK_PORT ?? 3001) });
 }

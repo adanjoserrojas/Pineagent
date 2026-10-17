@@ -18,18 +18,30 @@ export function useSession(): Session {
 const env = import.meta.env;
 const auth0Configured = Boolean(env.VITE_AUTH0_DOMAIN && env.VITE_AUTH0_CLIENT_ID);
 
+// Dev builds honour ?as=<name> even with Auth0 configured, so one person can test two users.
+const devIdentityRequested = import.meta.env.DEV && new URLSearchParams(window.location.search).has("as");
+
 // Auth0 when configured; otherwise a dev identity from ?as=<name> that only the mock server accepts.
 export function AuthGate({ children }: { children: ReactNode }) {
-  if (!auth0Configured) return <DevSession>{children}</DevSession>;
+  if (!auth0Configured || devIdentityRequested) return <DevSession>{children}</DevSession>;
   return (
     <Auth0Provider
       domain={env.VITE_AUTH0_DOMAIN}
       clientId={env.VITE_AUTH0_CLIENT_ID}
+      // Auth0 only redirects to registered URLs, so always come back to the origin and restore
+      // the workspace path from appState.
       authorizationParams={{
-        redirect_uri: window.location.origin + window.location.pathname,
+        redirect_uri: window.location.origin,
         audience: env.VITE_AUTH0_AUDIENCE || undefined,
         connection: "github",
       }}
+      onRedirectCallback={(appState) => {
+        window.history.replaceState(null, "", appState?.returnTo ?? "/");
+      }}
+      // Refresh tokens survive reloads without third-party cookies. The localStorage cache is an
+      // XSS exposure we accept for the hackathon; revisit before any real deployment.
+      useRefreshTokens
+      cacheLocation="localstorage"
     >
       <Auth0Session>{children}</Auth0Session>
     </Auth0Provider>
@@ -46,25 +58,33 @@ function DevSession({ children }: { children: ReactNode }) {
 }
 
 function Auth0Session({ children }: { children: ReactNode }) {
-  const { isLoading, isAuthenticated, error, user, loginWithRedirect, getAccessTokenSilently, logout } = useAuth0();
+  const { isLoading, isAuthenticated, error, user, loginWithRedirect, getAccessTokenSilently, getIdTokenClaims, logout } =
+    useAuth0();
   const session = useMemo<Session | null>(
     () =>
       isAuthenticated
         ? {
             displayName: user?.nickname ?? user?.name ?? "you",
             getToken: async () => {
-              const token = await getAccessTokenSilently();
-              if (!token) throw new Error("Auth0 returned no access token");
+              // With an API audience the access token is a JWT the real server verifies. Without one,
+              // Auth0 issues an opaque token, so dev falls back to the ID token (mock-only).
+              const token = env.VITE_AUTH0_AUDIENCE
+                ? await getAccessTokenSilently()
+                : (await getAccessTokenSilently().then(() => getIdTokenClaims()))?.__raw;
+              if (!token) throw new Error("Auth0 returned no token");
               return token;
             },
             signOut: () => logout({ logoutParams: { returnTo: window.location.origin } }),
           }
         : null,
-    [isAuthenticated, user, getAccessTokenSilently, logout],
+    [isAuthenticated, user, getAccessTokenSilently, getIdTokenClaims, logout],
   );
 
   if (isLoading) return <p className="center-note">Signing in…</p>;
-  if (!session) return <SignIn error={error?.message} onSignIn={() => loginWithRedirect()} />;
+  if (!session) {
+    const returnTo = window.location.pathname + window.location.search;
+    return <SignIn error={error?.message} onSignIn={() => loginWithRedirect({ appState: { returnTo } })} />;
+  };
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;
 }
 
