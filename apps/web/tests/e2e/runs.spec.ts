@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { startMock, type MockOptions } from "../../mock/server";
 
-// The run panel and the plant against the mock harness (docs/contracts/RUN_EVENTS.md).
+// The run panel and the plant against the mock harness (contracts/RUN_EVENTS.md).
 // Release scenarios 2 (plant shows planning/routing/executing/approval/error/done) and 3 (fallback).
 
 process.env.MOCK_AVATARS = "0";

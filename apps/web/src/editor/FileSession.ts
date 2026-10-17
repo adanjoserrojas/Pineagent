@@ -1,7 +1,7 @@
 import type { Lock, LockAcquireAck, Op, OpsAck, ServerToClientEvents, SnapshotAck } from "../contracts/socket";
 import { applyOps } from "../shared/ops";
 
-// One open file's editing state, following docs/contracts/SOCKET_LOCKS_AND_FILES.md.
+// One open file's editing state, following contracts/SOCKET_LOCKS_AND_FILES.md.
 // Pure TypeScript: no React, no Monaco, no socket. The SessionManager supplies the server side
 // (SessionPort) and the editor binds an EditorSink to receive text changes.
 

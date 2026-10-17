@@ -1,4 +1,4 @@
-// One serial Git queue per worktree (LLD section 6, docs/contracts/GIT_QUEUE.md).
+// One serial Git queue per worktree (LLD section 6, contracts/GIT_QUEUE.md).
 // Commits only paths the requester alone edited, as that user; push = commit, fetch, rebase, push.
 import type { GitChange, GitErrorCode, GitJob, GitResult, GitStatusAck } from "../src/contracts/socket";
 import { GitError, type GitRepo } from "./git";

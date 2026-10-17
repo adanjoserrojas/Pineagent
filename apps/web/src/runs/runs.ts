@@ -1,7 +1,7 @@
 import type { RunEvent, RunState, RunView } from "../contracts/socket";
 import type { ConnectionStatus } from "../state/workspace";
 
-// Pure run-panel logic, shared by the store and the plant (docs/contracts/RUN_EVENTS.md).
+// Pure run-panel logic, shared by the store and the plant (contracts/RUN_EVENTS.md).
 
 // Keeps a run only if the event is newer than what we have; returns null when it is old news.
 export function applyRunEvent(runs: ReadonlyMap<string, RunView>, e: RunEvent): Map<string, RunView> | null {
