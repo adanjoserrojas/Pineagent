@@ -232,7 +232,7 @@ export function createGateway(opts: GatewayOptions) {
         timing: { heartbeatMs, leaseMs },
       });
       socket.to(room).emit("presence:changed", { ...presenceOf(user), status: "joined", openPath: self.openPath });
-      socket.emit("git:changes", { changes: await r.changes.current() });
+      socket.emit("git:changes", { changes: await r.changes.forJoin() });
     });
 
     socket.on("file:snapshot", async ({ path }, ack) => {

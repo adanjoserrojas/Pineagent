@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
-import { GitRepo } from "@pineagent/core/server";
+import { ChangeFeed, GitRepo } from "@pineagent/core/server";
 import { GitQueue, type Author } from "@pineagent/core/server";
 import { Workspace } from "@pineagent/core/server";
 import type { GitJob, GitResult } from "@pineagent/core/contracts";
@@ -180,5 +180,20 @@ describe("push", () => {
     expect(r.ok === false && r.message).toContain("Your commit is saved");
     expect(await lastCommit()).toEqual({ author: "alice", files: ["src/auth.ts"] });
     expect(await readFile(join(ws.root, "src/db.ts"), "utf8")).toContain("bob's unsaved work");
+  });
+});
+
+describe("git:changes feed", () => {
+  it("after a start with work already in the tree, still announces the tree going clean", async () => {
+    let status = [{ path: "README.md", status: "M" as const }];
+    const repo = { status: async () => status } as unknown as GitRepo;
+    const heard: unknown[] = [];
+    const feed = new ChangeFeed(repo, (c) => heard.push(c), 0);
+    expect(await feed.forJoin()).toEqual([{ path: "README.md", status: "M" }]);
+    status = [];
+    feed.poke();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(heard.at(-1)).toEqual([]);
+    feed.close();
   });
 });
