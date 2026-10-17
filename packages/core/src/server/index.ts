@@ -5,4 +5,5 @@ export { GitError, GitRepo, tokenEnv, type GitStatusEntry } from "./git";
 export { ChangeFeed } from "./gitChanges";
 export { GitQueue, type Author, type QueueEvents } from "./gitQueue";
 export { noHarness, type Harness, type HarnessContext, type HarnessEvents, type HarnessFactory } from "./harness";
-export { MAX_FILE_BYTES, Workspace, publicLock, type ReadResult, type Timing } from "./workspace";
+export { MemoryStore, type RoomSnapshot, type RoomStore, type Store, type StoredFile, type StoredLock } from "./store";
+export { MAX_FILE_BYTES, Workspace, publicLock, type Persistence, type ReadResult, type Timing } from "./workspace";

@@ -22,6 +22,19 @@ export class ChangeFeed {
       .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
 
+  // The list for someone joining. When it isn't what the room last heard (the first join after a
+  // start, with work already in the tree), the room hears it too, so the next change is compared
+  // with what clients actually have.
+  async forJoin(): Promise<FileChange[]> {
+    const changes = await this.current();
+    const key = JSON.stringify(changes);
+    if (key !== this.last && !this.closed) {
+      this.last = key;
+      this.emit(changes);
+    }
+    return changes;
+  }
+
   poke() {
     if (this.closed) return;
     clearTimeout(this.timer);

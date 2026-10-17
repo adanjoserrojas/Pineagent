@@ -17,6 +17,7 @@ import { ChangeFeed } from "./gitChanges";
 import type { GitRepo } from "./git";
 import { GitQueue, type Author } from "./gitQueue";
 import { noHarness, type Harness, type HarnessFactory } from "./harness";
+import type { Store } from "./store";
 import { Workspace } from "./workspace";
 
 export type Room = { id: string; ws: Workspace; repo: GitRepo; queue: GitQueue; harness: Harness; changes: ChangeFeed };
@@ -35,6 +36,8 @@ export type GatewayOptions = {
   gitCredentials?(userId: string): Promise<Record<string, string>>;
   author?(user: User): Author;
   harness?: HarnessFactory;
+  // Where locks, versions and editors are kept so a restart can restore them. None = memory only.
+  store?: Store;
   timing?: { heartbeatMs: number; leaseMs: number; idleMs: number; sweepMs: number };
   snapshotDelayMs?: number; // simulates a slow server for the browser's loading states
   log?: (event: string, fields?: Record<string, unknown>) => void;
@@ -87,7 +90,17 @@ export function createGateway(opts: GatewayOptions) {
   async function openRoom(ctx: JoinContext): Promise<Room> {
     const room = ctx.roomId;
     const repo = await opts.prepare(ctx);
-    const ws = new Workspace(repo.dir, { leaseMs, idleMs });
+    const persistence = opts.store && {
+      store: opts.store.room(room),
+      failed: (op: string, err: unknown) => log("store.failed", { room, op, error: String(err) }),
+    };
+    const ws = new Workspace(repo.dir, { leaseMs, idleMs }, Date.now, persistence);
+    // A store that can't be read leaves the room empty, as if it were the first start.
+    const restored = await ws.restore().catch((err) => {
+      log("store.failed", { room, op: "load", error: String(err) });
+      return null;
+    });
+    if (restored?.locks || restored?.files) log("room.restored", { room, ...restored });
     const changes = new ChangeFeed(repo, (list) => io.to(room).emit("git:changes", { changes: list }));
     const queue = new GitQueue(
       ws,
@@ -219,7 +232,7 @@ export function createGateway(opts: GatewayOptions) {
         timing: { heartbeatMs, leaseMs },
       });
       socket.to(room).emit("presence:changed", { ...presenceOf(user), status: "joined", openPath: self.openPath });
-      socket.emit("git:changes", { changes: await r.changes.current() });
+      socket.emit("git:changes", { changes: await r.changes.forJoin() });
     });
 
     socket.on("file:snapshot", async ({ path }, ack) => {
@@ -238,6 +251,7 @@ export function createGateway(opts: GatewayOptions) {
       // Malformed requests get no ack; the client's timeout handles it.
       if (!j || (kind !== "file" && kind !== "dir") || !j.ws.resolvePath(target)) return;
       const res = j.ws.acquire(path, kind, user.id);
+      await j.ws.lockSaved(path); // written through before the ack (contract rule 5)
       if (res.ok) {
         ack({ ok: true, lock: res.lock });
         if (res.created) io.to(j.room).emit("lock:changed", { path, kind, lock: res.lock, reason: "acquired" });
@@ -249,6 +263,7 @@ export function createGateway(opts: GatewayOptions) {
     socket.on("lock:release", async ({ path }, ack) => {
       const j = await joined();
       const released = j?.ws.release(path, user.id);
+      if (released) await j!.ws.lockSaved(path);
       ack({ ok: true });
       if (j && released) io.to(j.room).emit("lock:changed", { path, kind: released.kind, lock: null, reason: "released" });
     });
@@ -341,16 +356,19 @@ export function createGateway(opts: GatewayOptions) {
     },
     close: async () => {
       clearInterval(sweeper);
+      const saving: Promise<void>[] = [];
       for (const r of rooms.values()) {
         void r.then(
           (room) => {
             room.harness.close();
             room.changes.close();
+            saving.push(room.ws.saved());
           },
           () => {},
         );
       }
       await new Promise<void>((resolve) => io.close(() => resolve()));
+      await Promise.all(saving); // let the last lock and version writes land before exiting
     },
   };
 }

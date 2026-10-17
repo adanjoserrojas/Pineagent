@@ -2,8 +2,8 @@
 # on the box fetches short-lived credentials for it from the instance metadata service. No access
 # keys are ever stored on the server, so there are none to leak.
 #
-# Least privilege: the role starts with only Session Manager. DynamoDB tables, Bedrock models and
-# Secrets Manager entries get added one by one (phase 4), each scoped to the exact resources.
+# Least privilege: Session Manager here, plus one policy per thing the server needs, each scoped
+# to the exact resources: release downloads (releases.tf), the two state tables (dynamodb.tf).
 
 data "aws_iam_policy_document" "ec2_assume" {
   statement {

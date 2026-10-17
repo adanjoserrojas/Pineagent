@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
-import { MAX_FILE_BYTES, Workspace } from "@pineagent/core/server";
+import { MAX_FILE_BYTES, MemoryStore, Workspace, type RoomStore } from "@pineagent/core/server";
 import { applyOps } from "@pineagent/core/ops";
 
 const FIXTURE = fileURLToPath(new URL("../../mock/fixtures/demo-repo", import.meta.url));
@@ -174,5 +174,111 @@ describe("files a real repository can contain", () => {
     ws.acquire("README.md", "file", ALICE);
     const res = await ws.applyOps("README.md", ALICE, 1, [{ offset: 0, length: 0, text: "x".repeat(MAX_FILE_BYTES) }]);
     expect(res).toMatchObject({ ok: false, code: "STALE" });
+  });
+});
+
+describe("restart recovery (store written through, memory stays the authority)", () => {
+  const ROOM = "ws:demo:main";
+  let store: MemoryStore;
+  let failures: string[];
+  const start = (roomStore: RoomStore = store.room(ROOM)) =>
+    new Workspace(ws.root, { leaseMs: LEASE, idleMs: IDLE }, () => now, { store: roomStore, failed: (op) => failures.push(op) });
+
+  beforeEach(() => {
+    store = new MemoryStore();
+    failures = [];
+  });
+
+  it("brings back editor locks with a fresh lease, file versions and editors", async () => {
+    const a = start();
+    a.acquire("src/auth.ts", "file", ALICE);
+    a.acquire("src/routes/", "dir", BOB);
+    await a.applyOps("src/auth.ts", ALICE, 1, [{ offset: 0, length: 0, text: "A" }]);
+    await a.saved();
+
+    now += 20_000; // the restart takes a while
+    const b = start();
+    expect(await b.restore()).toEqual({ locks: 2, files: 1 });
+    expect(b.allLocks()).toEqual([
+      { path: "src/auth.ts", kind: "file", holder: ALICE, holderType: "user", expiresAt: now + LEASE },
+      { path: "src/routes/", kind: "dir", holder: BOB, holderType: "user", expiresAt: now + LEASE },
+    ]);
+    expect(await b.read("src/auth.ts")).toMatchObject({ version: 2 });
+    expect(b.editorsOf("src/auth.ts")).toEqual([ALICE]);
+    expect(await b.applyOps("src/auth.ts", ALICE, 2, [{ offset: 0, length: 0, text: "B" }])).toEqual({ ok: true, version: 3 });
+  });
+
+  it("forgets released and expired locks, and committed paths' editors", async () => {
+    const a = start();
+    a.acquire("src/auth.ts", "file", ALICE);
+    a.acquire("src/db.ts", "file", BOB);
+    await a.applyOps("src/auth.ts", ALICE, 1, [{ offset: 0, length: 0, text: "A" }]);
+    a.release("src/auth.ts", ALICE);
+    now += LEASE;
+    a.heartbeat(ALICE);
+    a.sweep(); // Bob went quiet
+    a.clearEditors(["src/auth.ts"]);
+    await a.saved();
+
+    const b = start();
+    await b.restore();
+    expect(b.allLocks()).toEqual([]);
+    expect(b.editorsOf("src/auth.ts")).toEqual([]);
+    expect(await b.read("src/auth.ts")).toMatchObject({ version: 2 }); // the version stays
+  });
+
+  it("doesn't keep agent run locks: the run ends with the process", async () => {
+    const a = start();
+    expect(a.acquireForRun(["src/db.ts"], ALICE, "r1").ok).toBe(true);
+    await a.saved();
+    expect((await store.room(ROOM).load()).locks).toEqual([]);
+  });
+
+  it("a file Git changed after the restart gets a newer version than anyone holds", async () => {
+    const a = start();
+    a.acquire("src/auth.ts", "file", ALICE);
+    await a.applyOps("src/auth.ts", ALICE, 1, [{ offset: 0, length: 0, text: "A" }]);
+    await a.saved();
+
+    const b = start();
+    await b.restore();
+    await writeFile(join(ws.root, "src/auth.ts"), "pulled\n");
+    expect(await b.reloadFromDisk("src/auth.ts")).toMatchObject({ after: "pulled\n", version: 3 });
+    const c = start();
+    await c.restore();
+    expect(await c.read("src/auth.ts")).toMatchObject({ version: 3 });
+  });
+
+  it("keeps editing when the store fails, and says so", async () => {
+    const broken: RoomStore = {
+      load: async () => ({ locks: [], files: [] }),
+      putLock: async () => { throw new Error("throttled"); },
+      deleteLock: async () => { throw new Error("throttled"); },
+      saveFile: async () => { throw new Error("throttled"); },
+      clearEditors: async () => { throw new Error("throttled"); },
+    };
+    const a = start(broken);
+    expect(a.acquire("src/auth.ts", "file", ALICE).ok).toBe(true);
+    await a.lockSaved("src/auth.ts");
+    expect(await a.applyOps("src/auth.ts", ALICE, 1, [{ offset: 0, length: 0, text: "A" }])).toEqual({ ok: true, version: 2 });
+    expect((await readFile(join(ws.root, "src/auth.ts"), "utf8")).startsWith("A")).toBe(true);
+    expect(failures).toEqual(["putLock", "saveFile"]);
+  });
+
+  it("writes the version to the store before the disk", async () => {
+    const seen: string[] = [];
+    const inner = store.room(ROOM);
+    const spy: RoomStore = {
+      ...inner,
+      saveFile: async (path, version, editor) => {
+        const disk = await readFile(join(ws.root, path), "utf8");
+        seen.push(`v${version} saved while disk ${disk.startsWith("A") ? "had" : "lacked"} the edit`);
+        await inner.saveFile(path, version, editor);
+      },
+    };
+    const a = start(spy);
+    a.acquire("src/auth.ts", "file", ALICE);
+    await a.applyOps("src/auth.ts", ALICE, 1, [{ offset: 0, length: 0, text: "A" }]);
+    expect(seen).toEqual(["v2 saved while disk lacked the edit"]);
   });
 });

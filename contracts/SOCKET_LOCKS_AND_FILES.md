@@ -77,7 +77,22 @@ C→S events use a Socket.IO acknowledgement. S→room events are broadcasts. A 
 2. A socket `disconnect` does **not** release locks. Wi-Fi drops are common; leases expire through the 30 s heartbeat timeout instead.
 3. A sweep timer releases leases past `expiresAt` or idle for 10 minutes, and emits `lock:changed` for each.
 4. A running agent run keeps its own leases alive. A run paused for approval counts as idle.
-5. Lock state is held in memory and written through to DynamoDB before the ack (table keys owned by Software Engineer 1).
+5. Lock state is held in memory and written through to DynamoDB before the ack (table keys owned by Software Engineer 1; see "Restart recovery").
+
+## Restart recovery (PROPOSED by Software Engineer 2, needs Software Engineer 1's OK on the keys)
+
+Memory is the authority while the process runs. DynamoDB is read once per branch, when the first person joins after a start.
+
+| Table | Key | Attributes | Written |
+| --- | --- | --- | --- |
+| `pineagent-locks` | PK `room` (`ws:<wsId>:<branch>`), SK `path` | `kind`, `holder`, `at` (ISO), `ttl` (epoch s, +7 days) | Put on acquire, Delete on release and sweep, before the ack |
+| `pineagent-files` | PK `room`, SK `path` | `version` (N), `editors` (string set), `at`, `ttl` (+30 days) | `SET version` (+ `ADD editors`) on every accepted `file:ops` and every Git refresh; `REMOVE editors` after a commit |
+
+- Only `user` locks are stored. Agent runs live in the Node process, so a restart ends the run and its locks.
+- A restored lock gets a fresh lease (`now + 30 s`): its holder reconnects and heartbeats, or the sweep frees it as usual. Heartbeats are not written.
+- The version is written **before** the file reaches disk. If the process dies between the two, the restored version is ahead of the disk, so a client holding the old version gets `STALE` and resyncs instead of editing text it doesn't have. A file that Git changes after a restart gets the restored version + 1.
+- Reads use strongly consistent queries. Store errors never block editing: they are logged (`store.failed`) and counted on `/health` (`store.errors`); what a later restart can restore is then incomplete.
+- No transactions: one process owns the lock table, so acquisition is already all-or-nothing in memory (including an agent's `writeSet`). If the harness ever runs in a second process, agent `writeSet` acquisition would become a `TransactWriteItems` with `attribute_not_exists(path)` conditions.
 
 ## Client behavior
 
@@ -143,6 +158,6 @@ On every `connect` event: `room:join`, replace the lock map with the returned `l
 
 ## Open items for the freeze
 
-- Software Engineer 1: DynamoDB `Locks` and `Files` item shapes, and the harness call for atomic agent `writeSet` acquisition.
+- Software Engineer 1: approve or change the DynamoDB item shapes in "Restart recovery" (built and deployed as proposed). Agent `writeSet` acquisition is `Workspace.acquireForRun`, in memory.
 - Software Engineer 1: whether terminal-sandbox `chown` enforcement subscribes to lock changes (recommended as a stretch goal).
 - Maximum ops-batch size and maximum file size for snapshots.

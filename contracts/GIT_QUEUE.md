@@ -69,5 +69,5 @@ type GitErrorCode =
 ## Open items for Software Engineer 1
 
 - Author email: GitHub noreply (`<id>+<login>@users.noreply.github.com`) needs the numeric id and login from the Auth0 profile.
-- `editors` must survive a server restart (DynamoDB `Files` item?) or be rebuilt as "unattributed".
+- `editors` survive a restart in the `pineagent-files` table (PROPOSED; see SOCKET_LOCKS_AND_FILES.md, "Restart recovery").
 - Agent-run commits: owner as author plus `Co-Authored-By: agent-run/<runId>`; agent edits count as the owner's.
