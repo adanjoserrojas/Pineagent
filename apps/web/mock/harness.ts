@@ -9,14 +9,8 @@
 //   same task twice → router mode cache
 // The run really locks its file and edits it, so the explorer, the editor and the commit dialog
 // all see the agent.
-import type { Lock, RouterMode, RunActionAck, RunCandidate, RunEvent, RunState, RunStep, RunView } from "../src/contracts/socket";
-import type { Workspace } from "./workspace";
-
-export type HarnessEvents = {
-  run(e: RunEvent): void;
-  lockChanged(path: string, lock: Lock | null, reason: "acquired" | "released"): void;
-  fileChanged(path: string, version: number, ops: { offset: number; length: number; text: string }[], author: string): void;
-};
+import type { RouterMode, RunActionAck, RunCandidate, RunStartAck, RunState, RunStep, RunView } from "@pineagent/core/contracts";
+import type { Harness, HarnessEvents, Workspace } from "@pineagent/core/server";
 
 type Owner = { id: string; name: string };
 
@@ -30,7 +24,7 @@ type Run = {
 const CONFIDENCE_THRESHOLD = 0.6; // LLD 2: placeholder, tune on real scores
 const MAX_TASK = 500;
 
-export class MockHarness {
+export class MockHarness implements Harness {
   private readonly runs = new Map<string, Run>();
   private readonly routedBefore = new Set<string>(); // the router's score cache
   private seq = 0;
@@ -48,8 +42,8 @@ export class MockHarness {
     return [...this.runs.values()].map((r) => r.view);
   }
 
-  start(owner: Owner, task: unknown): string | null {
-    if (typeof task !== "string" || !task.trim() || task.length > MAX_TASK) return null;
+  start(owner: Owner, task: unknown): RunStartAck {
+    if (typeof task !== "string" || !task.trim() || task.length > MAX_TASK) return { ok: false, code: "BAD_REQUEST" };
     const runId = `run-${++this.seq}`;
     const run: Run = {
       view: {
@@ -71,7 +65,7 @@ export class MockHarness {
     };
     this.runs.set(runId, run);
     void this.drive(run).catch((err) => this.fail(run, -1, String(err)));
-    return runId;
+    return { ok: true, runId };
   }
 
   approve(runId: string, userId: string, choice: { candidateId?: unknown; none?: unknown; hint?: unknown }): RunActionAck {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { githubAvatarUrl, type Lock } from "../../src/contracts/socket";
+import { githubAvatarUrl, type Lock } from "@pineagent/core/contracts";
 import { allDirs, buildTree, changedDirs, coveringDirLock, fileTile, filterPaths, isLocked, parentDir, visibleRows } from "../../src/tree/model";
 
 const PATHS = ["README.md", "src/routes/users.ts", "src/auth.ts", "package.json", "src/routes/index.ts", "src/db.ts"];

@@ -31,7 +31,7 @@ export default function EditorPane({
 }) {
   const requested = manager.get(path);
   const requestedState = useSyncExternalStore(requested.subscribe, requested.getState);
-  const hasText = (s: SessionState) => s.version > 0 || s.status === "missing" || s.status === "error";
+  const hasText = (s: SessionState) => s.version > 0 || s.status === "missing" || s.status === "unsupported" || s.status === "error";
 
   const [shownPath, setShownPath] = useState(path);
   useEffect(() => {
@@ -125,7 +125,7 @@ export default function EditorPane({
   };
 
   const readOnly = switching || !EDITABLE.has(state.status);
-  const showEditor = hasText(state) && state.status !== "missing" && state.status !== "error";
+  const showEditor = hasText(state) && state.status !== "missing" && state.status !== "unsupported" && state.status !== "error";
 
   return (
     <section className="editor" aria-label={`Editor: ${path}`} aria-busy={switching || state.status === "loading"}>
@@ -201,6 +201,10 @@ export default function EditorPane({
               </div>
             )}
           </>
+        ) : state.status === "unsupported" ? (
+          <p className="editor-note" role="status">
+            {path} can’t be opened in the editor: {state.unsupported === "binary" ? "it’s a binary file" : "it’s larger than 1 MB"}.
+          </p>
         ) : state.status === "missing" ? (
           <p className="editor-note" role="alert">
             {path} isn’t on the server anymore.
@@ -256,6 +260,8 @@ function statusText(s: SessionState, switching: boolean, connected: boolean, nam
       return s.holder ? `● Read-only · ${nameOf(s.holder)} is editing` : "● Read-only";
     case "missing":
       return "File not found on the server";
+    case "unsupported":
+      return "Not editable here";
     case "error":
       return "Couldn’t load this file";
   }

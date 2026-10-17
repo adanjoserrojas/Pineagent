@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RunEvent, RunView } from "../../src/contracts/socket";
+import type { RunEvent, RunView } from "@pineagent/core/contracts";
 import { applyRunEvent, DONE_HOLD_MS, ERROR_HOLD_MS, mergeRuns, plantFace } from "../../src/runs/runs";
 
 const ME = "dev|me";

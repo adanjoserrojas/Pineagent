@@ -55,7 +55,7 @@ button { font: inherit; }
 .pill-connected { background: #15281f; color: #8ce6ba; }
 .pill-connecting, .pill-reconnecting { background: #2a1f10; color: #f7d2aa; }
 .pill-offline { background: #1e2422; color: #c7d3e2; }
-.pill-unauthenticated, .pill-forbidden { background: #2b1418; color: #ffc4cc; }
+.pill-unauthenticated, .pill-forbidden, .pill-unavailable { background: #2b1418; color: #ffc4cc; }
 .pill-action { border: 1px solid #5a2a32; font: inherit; cursor: pointer; }
 .pill-action:hover { border-color: var(--danger); }
 

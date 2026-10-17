@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { GitRepo } from "../../mock/git";
+import { GitRepo } from "@pineagent/core/server";
 import { startMock } from "../../mock/server";
 
 // Release scenario 7: one user cannot commit another user's uncommitted paths.

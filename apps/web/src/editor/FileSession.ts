@@ -12,6 +12,7 @@ export type SessionStatus =
   | "writing" // this user holds the lock; edits flush every 100 ms
   | "readonly" // someone else (or this user's agent) holds the lock
   | "missing" // the server doesn't have the file
+  | "unsupported" // binary or too large to edit here (see `unsupported`)
   | "error"; // the snapshot request failed; retry with open()
 
 export type SessionState = {
@@ -23,6 +24,7 @@ export type SessionState = {
   lostText: string | null; // D2: the user's unsaved text, offered via "Copy my version"
   heldNotice: Lock | null; // D1: set when we lost the race for the lock
   inFlight: boolean; // a batch is waiting for its ack
+  unsupported: "binary" | "too_large" | null;
 };
 
 export interface SessionPort {
@@ -64,7 +66,7 @@ export class FileSession {
     private readonly port: SessionPort,
   ) {
     this.base = "";
-    this.state = { path, status: "loading", text: "", version: 0, holder: null, lostText: null, heldNotice: null, inFlight: false };
+    this.state = { path, status: "loading", text: "", version: 0, holder: null, lostText: null, heldNotice: null, inFlight: false, unsupported: null };
   }
 
   // --- React / editor plumbing -------------------------------------------------------------
@@ -266,10 +268,10 @@ export class FileSession {
       return;
     }
     if (g !== this.gen) return;
-    if (!res.ok) return this.set({ status: "missing", holder: null });
+    if (!res.ok) return this.set(notEditable(res));
     this.base = res.content;
     this.showText(res.content);
-    this.set({ ...this.settled(), version: res.version });
+    this.set({ ...this.settled(), version: res.version, unsupported: null });
     // A change was announced while the snapshot was in flight and the snapshot predates it.
     if (this.newestSeen > res.version) void this.load();
     this.releaseIfDone();
@@ -324,7 +326,7 @@ export class FileSession {
       this.recovering = false;
     }
     if (g !== this.gen) return;
-    if (!res.ok) return this.set({ status: "missing" });
+    if (!res.ok) return this.set(notEditable(res));
     const inflight = this.inflight;
     if (res.version === this.state.version) {
       // The server never got the in-flight batch: send it again, followed by the rest.
@@ -355,4 +357,10 @@ export class FileSession {
     this.releaseRequested = false;
     if (this.lockState().mine && this.port.connected()) this.port.release(this.path);
   }
+}
+
+function notEditable(res: Extract<SnapshotAck, { ok: false }>): Partial<SessionState> {
+  return res.code === "UNSUPPORTED"
+    ? { status: "unsupported", unsupported: res.reason, holder: null }
+    : { status: "missing", holder: null };
 }

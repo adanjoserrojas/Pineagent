@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { io, type Socket } from "socket.io-client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startMock } from "../../mock/server";
-import type { ClientToServerEvents, ServerToClientEvents } from "../../src/contracts/socket";
+import type { ClientToServerEvents, ServerToClientEvents } from "@pineagent/core/contracts";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -160,6 +160,25 @@ describe("mock handshake and room:join", () => {
     await a.emitWithAck("lock:release", { path: "src/auth.ts" });
     await a.emitWithAck("git:commit", { paths: ["src/auth.ts"], message: "x", push: false });
     expect(await seen).toEqual([{ path: "notes.md", status: "A" }]);
+  });
+
+  it("answers UNSUPPORTED for a binary file, and run:start says no harness is plugged in only when there isn't one", async () => {
+    const a = client("dev:wes");
+    await connected(a);
+    await a.emitWithAck("room:join", { wsId: "w8", branch: "main" });
+    const room = await mock.room("ws:w8:main");
+    await writeFile(join(room.ws.root, "logo.png"), Buffer.from([0x89, 0x50, 0x00, 0x47]));
+    expect(await a.emitWithAck("file:snapshot", { path: "logo.png" })).toEqual({ ok: false, code: "UNSUPPORTED", reason: "binary" });
+    expect(await a.emitWithAck("run:start", { task: "  " })).toEqual({ ok: false, code: "BAD_REQUEST" });
+  });
+
+  it("refuses malformed workspace and branch names", async () => {
+    const a = client("dev:xia");
+    await connected(a);
+    for (const [wsId, branch] of [["../etc", "main"], ["a/b/c", "main"], ["demo", "../main"], ["demo", "a//b"], ["demo", ""]]) {
+      expect(await a.emitWithAck("room:join", { wsId, branch })).toEqual({ ok: false, code: "NOT_COLLABORATOR" });
+    }
+    expect(await a.emitWithAck("room:join", { wsId: "owner/repo", branch: "feat/x" })).toMatchObject({ ok: true });
   });
 
   it("keeps branches in separate rooms", async () => {

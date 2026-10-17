@@ -1,13 +1,17 @@
-// One branch's shared state on the mock: its files, their versions, and the lock table.
+// One branch's shared state: its files, their versions, and the lock table.
 // No sockets here, so the rules can be unit-tested with a fake clock.
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
-import type { Lock, LockChangeReason, Op } from "../src/contracts/socket";
-import { applyOps } from "../src/shared/ops";
+import type { Lock, LockChangeReason, Op } from "../contracts";
+import { applyOps } from "../ops";
 
 export type Timing = { leaseMs: number; idleMs: number };
 type HeldLock = Lock & { lastEditAt: number };
 type FileState = { content: string; version: number };
+export type ReadResult = FileState | { unsupported: "binary" | "too_large" } | null;
+
+// Bigger files aren't opened in the editor: every viewer holds the whole text.
+export const MAX_FILE_BYTES = 1_000_000;
 
 export type AcquireResult = { ok: true; lock: Lock; created: boolean } | { ok: false; code: "HELD"; lock: Lock };
 export type OpsResult = { ok: true; version: number } | { ok: false; code: "NOT_HOLDER" | "STALE"; currentVersion: number };
@@ -25,6 +29,7 @@ export class Workspace {
   private readonly editors = new Map<string, Set<string>>();
   // While Git works on the tree, edits to the affected paths wait here instead of landing mid-commit.
   private gate: { paths: ReadonlySet<string> | "all"; open: Promise<void> } | null = null;
+  private realRoot: Promise<string> | undefined;
 
   constructor(
     readonly root: string,
@@ -113,13 +118,30 @@ export class Workspace {
     return undefined;
   }
 
-  async read(path: string): Promise<FileState | null> {
+  // A path can look inside the workspace and still be a symlink to somewhere else (a real repo
+  // can contain `secrets -> /etc`), so check where it actually lands before touching it.
+  private async inside(full: string): Promise<boolean> {
+    this.realRoot ??= realpath(this.root);
+    try {
+      const [root, real] = await Promise.all([this.realRoot, realpath(full)]);
+      return real.startsWith(root + sep);
+    } catch {
+      return false;
+    }
+  }
+
+  // The text editors see, or why it can't be edited here. null = no such file.
+  async open(path: string): Promise<ReadResult> {
     const cached = this.files.get(path);
     if (cached) return cached;
     const full = this.resolvePath(path);
-    if (!full) return null;
+    if (!full || !(await this.inside(full))) return null;
     try {
+      const info = await stat(full);
+      if (!info.isFile()) return null;
+      if (info.size > MAX_FILE_BYTES) return { unsupported: "too_large" };
       const content = await readFile(full, "utf8");
+      if (content.includes("\0")) return { unsupported: "binary" };
       // Another read may have loaded it while this one awaited the disk.
       const state = this.files.get(path) ?? { content, version: 1 };
       this.files.set(path, state);
@@ -132,6 +154,12 @@ export class Workspace {
   // Accepted only from the lock holder, built on the current version, with ops that fit the text.
   // With `runId`, the edit is that agent run's and must hold the run's own lock; it still counts
   // as the owner's edit for commit ownership.
+  // Only editable text files; see open() for why one isn't.
+  async read(path: string): Promise<FileState | null> {
+    const file = await this.open(path);
+    return file && "content" in file ? file : null;
+  }
+
   async applyOps(path: string, userId: string, baseVersion: number, ops: Op[], runId?: string): Promise<OpsResult> {
     const file = await this.read(path);
     // Checked after the last await before mutating, so a freeze() can't slip in between.
@@ -141,7 +169,7 @@ export class Workspace {
     if (!lock) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
     if (baseVersion !== file.version || !Array.isArray(ops)) return { ok: false, code: "STALE", currentVersion: file.version };
     const next = applyOps(file.content, ops);
-    if (next === null) return { ok: false, code: "STALE", currentVersion: file.version };
+    if (next === null || Buffer.byteLength(next) > MAX_FILE_BYTES) return { ok: false, code: "STALE", currentVersion: file.version };
 
     // Update memory synchronously so the next batch sees this version, then persist before acking.
     file.content = next;
@@ -228,7 +256,9 @@ export class Workspace {
     const state = this.files.get(path);
     let after: string;
     try {
-      after = await readFile(full!, "utf8");
+      // Pulled-in symlinks that leave the workspace are treated like deleted files.
+      if (!full || !(await this.inside(full))) throw new Error("outside the workspace");
+      after = await readFile(full, "utf8");
     } catch {
       this.files.delete(path);
       return null;

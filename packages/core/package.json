@@ -1,0 +1,16 @@
+{
+  "name": "@pineagent/core",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Socket contract, edit ops, and the workspace server (locks, files, Git queue, gateway) shared by the dev mock and services/api.",
+  "exports": {
+    "./contracts": "./src/contracts.ts",
+    "./ops": "./src/ops.ts",
+    "./server": "./src/server/index.ts"
+  },
+  "dependencies": {
+    "jose": "^6.2.12",
+    "socket.io": "^4.8.4"
+  }
+}

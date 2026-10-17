@@ -54,7 +54,7 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
     try {
       const res = await socket.timeout(ACK_TIMEOUT_MS).emitWithAck("run:start", { task });
       if (res.ok) setTask("");
-      else setProblem("The server didn’t accept that task.");
+      else setProblem(res.code === "NOT_AVAILABLE" ? "Agent runs aren’t available on this server yet." : "The server didn’t accept that task.");
     } catch {
       setProblem("The server didn’t answer. Try again.");
     } finally {

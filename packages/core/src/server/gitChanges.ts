@@ -1,7 +1,7 @@
 // Branch-wide working-tree status for the explorer's M/A/D letters (contracts/GIT_QUEUE.md,
 // `git:changes`). Anything that can touch the worktree pokes it; one `git status` runs per burst
 // and the room only hears about it when the set actually changed.
-import type { FileChange } from "../src/contracts/socket";
+import type { FileChange } from "../contracts";
 import type { GitRepo } from "./git";
 
 export class ChangeFeed {

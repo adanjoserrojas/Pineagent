@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
-import { GitRepo } from "../../mock/git";
-import { GitQueue, type Author } from "../../mock/gitQueue";
-import { Workspace } from "../../mock/workspace";
-import type { GitJob, GitResult } from "../../src/contracts/socket";
+import { GitRepo } from "@pineagent/core/server";
+import { GitQueue, type Author } from "@pineagent/core/server";
+import { Workspace } from "@pineagent/core/server";
+import type { GitJob, GitResult } from "@pineagent/core/contracts";
 
 // The Git queue against real git: a worktree repo plus a bare repo standing in for GitHub.
 

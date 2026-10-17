@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
-import { Workspace } from "../../mock/workspace";
-import type { Lock, Op } from "../../src/contracts/socket";
+import { Workspace } from "@pineagent/core/server";
+import type { Lock, Op } from "@pineagent/core/contracts";
 import { FileSession, type SessionPort } from "../../src/editor/FileSession";
-import { applyOps } from "../../src/shared/ops";
+import { applyOps } from "@pineagent/core/ops";
 import { coveringDirLock } from "../../src/tree/model";
 
 // Two users' FileSessions wired to the real mock Workspace through an in-memory "network"

@@ -1,6 +1,6 @@
 // One serial Git queue per worktree (LLD section 6, contracts/GIT_QUEUE.md).
 // Commits only paths the requester alone edited, as that user; push = commit, fetch, rebase, push.
-import type { GitChange, GitErrorCode, GitJob, GitResult, GitStatusAck } from "../src/contracts/socket";
+import type { GitChange, GitErrorCode, GitJob, GitResult, GitStatusAck } from "../contracts";
 import { GitError, type GitRepo } from "./git";
 import type { Workspace } from "./workspace";
 
@@ -26,6 +26,8 @@ export class GitQueue {
     private readonly ws: Workspace,
     private readonly repo: GitRepo,
     private readonly events: QueueEvents,
+    // Environment that lets git reach the remote as this user (their own GitHub token, rule 5).
+    private readonly credentials: (userId: string) => Promise<Record<string, string>> = async () => ({}),
   ) {}
 
   async changes(userId: string): Promise<GitChange[]> {
@@ -121,7 +123,8 @@ export class GitQueue {
     // A failed push after a successful commit must say the commit is safe.
     const kept = committed.length ? " Your commit is saved and will go out with the next push." : "";
     const pushFail = (code: GitErrorCode, msg: string, held?: string[]) => this.fail(job, code, msg + kept, held);
-    await this.repo.run(["fetch", "-q", "origin"]);
+    const auth = await this.credentials(author.id);
+    await this.repo.run(["fetch", "-q", "origin"], auth);
     const behind = Number((await this.repo.run(["rev-list", "--count", `HEAD..origin/${branch}`])).trim());
     if (behind > 0) {
       // Never rebase over someone's uncommitted work: hold the push if incoming commits touch it.
@@ -155,7 +158,7 @@ export class GitQueue {
     }
 
     try {
-      await this.repo.run(["push", "-q", "origin", `HEAD:${branch}`]);
+      await this.repo.run(["push", "-q", "origin", `HEAD:${branch}`], auth);
     } catch {
       return pushFail("PUSH_REJECTED", "The remote changed while pushing; try again.");
     }

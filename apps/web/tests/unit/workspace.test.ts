@@ -1,10 +1,10 @@
-import { cp, mkdtemp, readFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
-import { Workspace } from "../../mock/workspace";
-import { applyOps } from "../../src/shared/ops";
+import { MAX_FILE_BYTES, Workspace } from "@pineagent/core/server";
+import { applyOps } from "@pineagent/core/ops";
 
 const FIXTURE = fileURLToPath(new URL("../../mock/fixtures/demo-repo", import.meta.url));
 const LEASE = 30_000;
@@ -141,5 +141,38 @@ describe("file:ops", () => {
   it("a folder claim lets you edit files inside it", async () => {
     ws.acquire("src/routes/", "dir", ALICE);
     expect(await ws.applyOps("src/routes/users.ts", ALICE, 1, [{ offset: 0, length: 0, text: "//\n" }])).toEqual({ ok: true, version: 2 });
+  });
+});
+
+describe("files a real repository can contain", () => {
+  it("won't follow a symlink out of the workspace, for reading or editing", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "pineagent-outside-"));
+    await writeFile(join(outside, "secret.txt"), "do not leak");
+    await symlink(join(outside, "secret.txt"), join(ws.root, "leak.txt"));
+    await symlink(outside, join(ws.root, "leakdir"));
+    expect(await ws.open("leak.txt")).toBeNull();
+    expect(await ws.open("leakdir/secret.txt")).toBeNull();
+    ws.acquire("leak.txt", "file", ALICE);
+    expect(await ws.applyOps("leak.txt", ALICE, 1, [{ offset: 0, length: 0, text: "x" }])).toMatchObject({ ok: false });
+    expect(await readFile(join(outside, "secret.txt"), "utf8")).toBe("do not leak");
+  });
+
+  it("still follows a symlink that stays inside the workspace", async () => {
+    await symlink("auth.ts", join(ws.root, "src/auth-link.ts"));
+    expect(await ws.open("src/auth-link.ts")).toMatchObject({ version: 1, content: expect.stringContaining("currentUser") });
+  });
+
+  it("reports binary and oversized files instead of opening them as text", async () => {
+    await writeFile(join(ws.root, "logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]));
+    await writeFile(join(ws.root, "big.json"), "x".repeat(MAX_FILE_BYTES + 1));
+    expect(await ws.open("logo.png")).toEqual({ unsupported: "binary" });
+    expect(await ws.open("big.json")).toEqual({ unsupported: "too_large" });
+    expect(await ws.read("logo.png")).toBeNull(); // so file:ops can't touch it either
+  });
+
+  it("refuses an edit that would grow a file past the limit", async () => {
+    ws.acquire("README.md", "file", ALICE);
+    const res = await ws.applyOps("README.md", ALICE, 1, [{ offset: 0, length: 0, text: "x".repeat(MAX_FILE_BYTES) }]);
+    expect(res).toMatchObject({ ok: false, code: "STALE" });
   });
 });

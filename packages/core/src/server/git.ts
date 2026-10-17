@@ -1,6 +1,8 @@
-// Thin wrapper over the git CLI for the mock's per-room repositories.
+// Thin wrapper over the git CLI for one branch's worktree (the mock's temp repos and the server's clones).
 import { execFile } from "node:child_process";
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export type GitStatusEntry = { path: string; status: "M" | "A" | "D" };
@@ -14,7 +16,8 @@ export class GitError extends Error {
   }
 }
 
-// Never let a developer's global git config, hooks or signing settings leak into the mock.
+// Never let a developer's (or the server's) global git config, hooks, signing settings or
+// credential helpers leak in.
 const BASE_ENV = {
   ...process.env,
   GIT_CONFIG_NOSYSTEM: "1",
@@ -23,6 +26,24 @@ const BASE_ENV = {
   GIT_COMMITTER_NAME: "Pineagent",
   GIT_COMMITTER_EMAIL: "pineagent@users.noreply.github.com",
 };
+
+// Git asks this script for a username and password when talking to GitHub over HTTPS. It holds no
+// secret itself: it echoes the token from the environment of that one git process, so the token is
+// never written to .git/config, a remote URL, or disk.
+let askpass: string | undefined;
+function askpassScript(): string {
+  if (askpass && existsSync(askpass)) return askpass;
+  const dir = mkdtempSync(join(tmpdir(), "pineagent-askpass-"));
+  askpass = join(dir, "askpass.sh");
+  writeFileSync(askpass, '#!/bin/sh\ncase "$1" in\n  Username*) echo x-access-token ;;\n  *) echo "$PINEAGENT_GIT_TOKEN" ;;\nesac\n');
+  chmodSync(askpass, 0o700);
+  return askpass;
+}
+
+// Environment for one git command that authenticates to GitHub as the token's owner.
+export function tokenEnv(token: string): Record<string, string> {
+  return { GIT_ASKPASS: askpassScript(), PINEAGENT_GIT_TOKEN: token };
+}
 
 export class GitRepo {
   constructor(
@@ -50,6 +71,22 @@ export class GitRepo {
     await repo.run(["remote", "add", "origin", remoteDir]);
     await repo.run(["push", "-q", "-u", "origin", branch]);
     return repo;
+  }
+
+  // A partial clone of one branch: full history (rebase needs it) but file contents fetched lazily.
+  static async clone(url: string, dir: string, branch: string, env: Record<string, string> = {}): Promise<GitRepo> {
+    const parent = new GitRepo(join(dir, ".."), branch);
+    await parent.run(["clone", "-q", "--filter=blob:none", "--single-branch", "--branch", branch, "--", url, dir], env);
+    return new GitRepo(dir, branch);
+  }
+
+  // Every file in the worktree that Git would track: committed or new, minus .gitignore'd ones
+  // (so node_modules and build output never reach the explorer).
+  async listFiles(): Promise<string[]> {
+    const out = await this.run(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { GIT_OPTIONAL_LOCKS: "0" });
+    const paths = [...new Set(out.split("\0").filter(Boolean))];
+    // --cached still lists tracked files that were deleted from disk.
+    return paths.filter((p) => existsSync(join(this.dir, p))).sort();
   }
 
   // Read-only and lock-free, so it can run alongside a queued job.

@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import { MockHarness } from "../../mock/harness";
-import { Workspace } from "../../mock/workspace";
-import type { Lock, RunEvent, RunView } from "../../src/contracts/socket";
+import { Workspace } from "@pineagent/core/server";
+import type { Lock, RunEvent, RunView } from "@pineagent/core/contracts";
 
 const FIXTURE = fileURLToPath(new URL("../../mock/fixtures/demo-repo", import.meta.url));
 const ALICE = { id: "dev|alice", name: "alice" };
@@ -36,13 +36,18 @@ beforeEach(async () => {
   );
 });
 
+const startRun = (owner: typeof ALICE, task: string): string => {
+  const res = harness.start(owner, task);
+  if (!res.ok) throw new Error(`run:start refused: ${res.code}`);
+  return res.runId;
+};
 const runOf = (id: string): RunView => harness.list().find((r) => r.runId === id)!;
 const statesOf = (id: string) => events.filter((e) => e.runId === id).map((e) => e.state);
 const until = (id: string, state: string) => expect.poll(() => runOf(id).state, { timeout: 5000 }).toBe(state);
 
 describe("happy path", () => {
   it("plans, locks, routes, executes three steps and finishes", async () => {
-    const id = harness.start(ALICE, "add a test for currentUser")!;
+    const id = startRun(ALICE, "add a test for currentUser");
     await until(id, "done");
     const states = statesOf(id);
     expect(states[0]).toBe("planning");
@@ -58,7 +63,7 @@ describe("happy path", () => {
   });
 
   it("really edits the file under a run lock, then releases it; the edit counts as the owner's", async () => {
-    const id = harness.start(ALICE, "tidy auth")!;
+    const id = startRun(ALICE, "tidy auth");
     await until(id, "done");
     expect((await ws.read("src/auth.ts"))!.content.startsWith("// alice's agent: tidy auth\n")).toBe(true);
     expect(lockEvents.map((l) => `${l.reason}:${l.lock?.holderType ?? "-"}`)).toEqual(["acquired:run", "released:-"]);
@@ -67,7 +72,7 @@ describe("happy path", () => {
   });
 
   it("targets the file named in the task", async () => {
-    const id = harness.start(ALICE, "speed up db.ts")!;
+    const id = startRun(ALICE, "speed up db.ts");
     await until(id, "done");
     expect(runOf(id).writeSet).toEqual(["src/db.ts"]);
   });
@@ -75,12 +80,12 @@ describe("happy path", () => {
 
 describe("router modes", () => {
   it("uses the LLM when the scorer is down, and the cache for a repeated task", async () => {
-    const a = harness.start(ALICE, "fallback please")!;
+    const a = startRun(ALICE, "fallback please");
     await until(a, "done");
     expect(runOf(a).routerMode).toBe("llm");
-    const b = harness.start(ALICE, "same task")!;
+    const b = startRun(ALICE, "same task");
     await until(b, "done");
-    const c = harness.start(ALICE, "same task")!;
+    const c = startRun(ALICE, "same task");
     await until(c, "done");
     expect([runOf(b).routerMode, runOf(c).routerMode]).toEqual(["jev", "cache"]);
   });
@@ -88,7 +93,7 @@ describe("router modes", () => {
 
 describe("approval", () => {
   it("low confidence waits for the owner; only the owner can choose", async () => {
-    const id = harness.start(ALICE, "unsure how to fix auth")!;
+    const id = startRun(ALICE, "unsure how to fix auth");
     await until(id, "awaiting_approval");
     const run = runOf(id);
     expect(run.candidates).toHaveLength(3);
@@ -102,7 +107,7 @@ describe("approval", () => {
   });
 
   it("'none of these' replans with the hint and goes on", async () => {
-    const id = harness.start(ALICE, "unsure")!;
+    const id = startRun(ALICE, "unsure");
     await until(id, "awaiting_approval");
     expect(harness.approve(id, ALICE.id, { none: true, hint: "keep the API" })).toEqual({ ok: true });
     await until(id, "done");
@@ -113,7 +118,7 @@ describe("approval", () => {
 
 describe("failure, blocking and pause", () => {
   it("a failing step ends in error at that step and frees the locks", async () => {
-    const id = harness.start(ALICE, "this will fail")!;
+    const id = startRun(ALICE, "this will fail");
     await until(id, "error");
     expect(runOf(id).error).toMatchObject({ nodeIndex: 1 });
     expect(ws.allLocks()).toEqual([]);
@@ -121,7 +126,7 @@ describe("failure, blocking and pause", () => {
 
   it("waits as blocked while someone else edits the file, then continues", async () => {
     ws.acquire("src/auth.ts", "file", BOB.id);
-    const id = harness.start(ALICE, "fix auth")!;
+    const id = startRun(ALICE, "fix auth");
     await until(id, "blocked");
     expect(runOf(id).blockedOn).toEqual({ path: "src/auth.ts", holder: BOB.id });
     ws.release("src/auth.ts", BOB.id);
@@ -131,14 +136,14 @@ describe("failure, blocking and pause", () => {
 
   it("the owner's own editor lock blocks their agent too", async () => {
     ws.acquire("src/auth.ts", "file", ALICE.id);
-    const id = harness.start(ALICE, "fix auth")!;
+    const id = startRun(ALICE, "fix auth");
     await until(id, "blocked");
     ws.release("src/auth.ts", ALICE.id);
     await until(id, "done");
   });
 
   it("pause stops at the next step boundary and hands the file back; resume continues", async () => {
-    const id = harness.start(ALICE, "pause me")!;
+    const id = startRun(ALICE, "pause me");
     // Requested while planning, so it lands on the first step boundary (steps are 5 ms here).
     expect(harness.pause(id, BOB.id)).toEqual({ ok: false, code: "NOT_OWNER" });
     expect(harness.pause(id, ALICE.id)).toEqual({ ok: true });
