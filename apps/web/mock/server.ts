@@ -20,10 +20,11 @@ import {
 } from "../src/contracts/socket";
 import { GitRepo } from "./git";
 import { GitQueue } from "./gitQueue";
+import { MockHarness } from "./harness";
 import { Workspace } from "./workspace";
 
 type User = { id: string; name: string; avatarUrl: string | null };
-type Room = { ws: Workspace; repo: GitRepo; queue: GitQueue; remoteDir: string };
+type Room = { ws: Workspace; repo: GitRepo; queue: GitQueue; harness: MockHarness; remoteDir: string };
 type SocketData = { user: User; room?: string; openPath: string | null };
 type MockSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 
@@ -86,6 +87,7 @@ export type MockOptions = {
   leaseMs?: number; // contract: 30 s without a heartbeat
   idleMs?: number; // contract: 10 min without edits
   sweepMs?: number;
+  runStepMs?: number; // how long each mock agent step takes
 };
 
 export async function startMock({
@@ -95,6 +97,7 @@ export async function startMock({
   leaseMs = 30_000,
   idleMs = 600_000,
   sweepMs = 1_000,
+  runStepMs = 900,
 }: MockOptions = {}) {
   const http = createServer();
   const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(http, {
@@ -127,7 +130,19 @@ export async function startMock({
             }),
           treeChanged: (path, change) => io.to(room).emit("tree:changed", { path, change }),
         });
-        return { ws, repo, queue, remoteDir };
+        const harness = new MockHarness(
+          ws,
+          room,
+          () => listFiles(root),
+          {
+            run: (e) => io.to(room).emit("run:event", e),
+            lockChanged: (path, lock, reason) => io.to(room).emit("lock:changed", { path, kind: "file", lock, reason }),
+            fileChanged: (path, version, ops, author) =>
+              io.to(room).emit("file:changed", { path, version, ops, author, source: "agent" }),
+          },
+          runStepMs,
+        );
+        return { ws, repo, queue, harness, remoteDir };
       })();
       rooms.set(room, r);
     }
@@ -236,6 +251,33 @@ export async function startMock({
       }
     });
 
+    socket.on("run:start", async ({ task }, ack) => {
+      const j = await joined();
+      const runId = j?.harness.start({ id: user.id, name: user.name }, task);
+      ack(runId ? { ok: true, runId } : { ok: false, code: "BAD_REQUEST" });
+    });
+
+    socket.on("run:list", async (_msg, ack) => {
+      const j = await joined();
+      ack({ ok: true, runs: j ? j.harness.list() : [] });
+    });
+
+    socket.on("run:approve", async (msg, ack) => {
+      const j = await joined();
+      if (!j || typeof msg?.runId !== "string") return ack({ ok: false, code: "NOT_FOUND" });
+      ack(j.harness.approve(msg.runId, user.id, msg as { candidateId?: unknown; none?: unknown; hint?: unknown }));
+    });
+
+    socket.on("run:pause", async ({ runId }, ack) => {
+      const j = await joined();
+      ack(j && typeof runId === "string" ? j.harness.pause(runId, user.id) : { ok: false, code: "NOT_FOUND" });
+    });
+
+    socket.on("run:resume", async ({ runId }, ack) => {
+      const j = await joined();
+      ack(j && typeof runId === "string" ? j.harness.resume(runId, user.id) : { ok: false, code: "NOT_FOUND" });
+    });
+
     socket.on("git:status", async (_msg, ack) => {
       const j = await joined();
       if (!j) return ack({ ok: true, branch: "main", ahead: 0, changes: [], queue: [] });
@@ -276,6 +318,7 @@ export async function startMock({
     room: roomFor,
     close: () => {
       clearInterval(sweeper);
+      for (const r of rooms.values()) void r.then((room) => room.harness.close());
       const closed = new Promise<void>((resolve) => io.close(() => resolve()));
       // Don't wait for half-open connections (e.g. a client that went offline) to time out.
       http.closeAllConnections();
@@ -299,5 +342,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     leaseMs: env("LEASE_MS"),
     idleMs: env("IDLE_MS"),
     sweepMs: env("SWEEP_MS"),
+    runStepMs: env("RUN_STEP_MS"),
   });
 }

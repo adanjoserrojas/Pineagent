@@ -39,6 +39,47 @@ export type OpsAck = { ok: true; version: number } | { ok: false; code: "NOT_HOL
 
 export type LockChangeReason = "acquired" | "released" | "expired" | "idle" | "revoked";
 
+// --- Agent runs (docs/contracts/RUN_EVENTS.md, draft; SE1 owns the run-state machine) -----
+
+export type RunState = "planning" | "routing" | "awaiting_approval" | "blocked" | "executing" | "paused" | "error" | "done";
+export type RouterMode = "jev" | "cache" | "llm";
+export type RunStep = { tool: string; detail: string; writes: string[] };
+export type RunCandidate = { id: string; score: number; steps: RunStep[] };
+
+export type RunView = {
+  runId: string;
+  ownerId: string;
+  ownerName: string;
+  task: string;
+  state: RunState;
+  routerMode: RouterMode | null;
+  nodeIndex: number;
+  seq: number;
+  steps: RunStep[];
+  candidates?: RunCandidate[];
+  confidence?: number;
+  writeSet: string[];
+  blockedOn?: { path: string; holder: string };
+  error?: { nodeIndex: number; message: string };
+  startedAt: number;
+  endedAt?: number;
+};
+
+// The fields fixed in PROJECT_MEMORY.md, plus `run` (PROPOSED): the full snapshot after this event.
+export type RunEvent = {
+  runId: string;
+  ownerId: string;
+  workspaceId: string;
+  seq: number;
+  state: RunState;
+  routerMode: RouterMode | null;
+  nodeIndex: number;
+  ts: number;
+  run: RunView;
+};
+
+export type RunActionAck = { ok: true } | { ok: false; code: "NOT_OWNER" | "NOT_WAITING" | "NOT_FOUND" };
+
 // --- Git queue (docs/contracts/GIT_QUEUE.md, draft) ---------------------------------------
 
 export type GitChange = {
@@ -84,6 +125,14 @@ export interface ClientToServerEvents {
   "file:ops": (msg: { path: string; baseVersion: number; ops: Op[] }, ack: (res: OpsAck) => void) => void;
   "git:status": (msg: Record<string, never>, ack: (res: GitStatusAck) => void) => void;
   "git:commit": (msg: { paths: string[]; message: string; push: boolean }, ack: (res: GitCommitAck) => void) => void;
+  "run:start": (msg: { task: string }, ack: (res: { ok: true; runId: string } | { ok: false; code: "BAD_REQUEST" }) => void) => void;
+  "run:list": (msg: Record<string, never>, ack: (res: { ok: true; runs: RunView[] }) => void) => void;
+  "run:approve": (
+    msg: { runId: string; candidateId: string } | { runId: string; none: true; hint: string },
+    ack: (res: RunActionAck) => void,
+  ) => void;
+  "run:pause": (msg: { runId: string }, ack: (res: RunActionAck) => void) => void;
+  "run:resume": (msg: { runId: string }, ack: (res: RunActionAck) => void) => void;
 }
 
 export interface ServerToClientEvents {
@@ -99,6 +148,7 @@ export interface ServerToClientEvents {
   "file:changed": (msg: { path: string; version: number; ops: Op[]; author: string; source: "editor" | "agent" | "shell" }) => void;
   "tree:changed": (msg: { path: string; change: "add" | "delete" | "rename"; newPath?: string }) => void;
   "git:queue": (msg: { jobs: GitJob[] }) => void;
+  "run:event": (msg: RunEvent) => void;
   "git:result": (msg: GitResult) => void;
 }
 

@@ -130,12 +130,14 @@ export class Workspace {
   }
 
   // Accepted only from the lock holder, built on the current version, with ops that fit the text.
-  async applyOps(path: string, userId: string, baseVersion: number, ops: Op[]): Promise<OpsResult> {
+  // With `runId`, the edit is that agent run's and must hold the run's own lock; it still counts
+  // as the owner's edit for commit ownership.
+  async applyOps(path: string, userId: string, baseVersion: number, ops: Op[], runId?: string): Promise<OpsResult> {
     const file = await this.read(path);
     // Checked after the last await before mutating, so a freeze() can't slip in between.
     while (this.gate && (this.gate.paths === "all" || this.gate.paths.has(path))) await this.gate.open;
     if (!file) return { ok: false, code: "NOT_HOLDER", currentVersion: 0 };
-    const lock = this.coveringLock(path, userId);
+    const lock = runId ? this.runLock(path, runId) : this.coveringLock(path, userId);
     if (!lock) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
     if (baseVersion !== file.version || !Array.isArray(ops)) return { ok: false, code: "STALE", currentVersion: file.version };
     const next = applyOps(file.content, ops);
@@ -151,6 +153,43 @@ export class Workspace {
     this.writes.set(path, write);
     await write;
     return { ok: true, version: file.version };
+  }
+
+  // --- Agent run locks (the harness keeps them alive, so they never expire) -------------------
+
+  // All-or-nothing, like the real harness's DynamoDB transaction: either every path is locked for
+  // the run or none is, and the first conflicting lock is returned. The owner's own editor lock
+  // conflicts too; their agent waits until they let go of the file.
+  acquireForRun(paths: string[], ownerId: string, runId: string): { ok: true; locks: Lock[] } | { ok: false; lock: Lock } {
+    for (const path of paths) {
+      for (const l of this.locks.values()) {
+        if (l.runId === runId) continue;
+        const above = l.kind === "dir" && path.startsWith(l.path);
+        if (l.path === path || above) return { ok: false, lock: publicLock(l) };
+      }
+    }
+    const now = this.now();
+    const created = paths.map((path) => {
+      const lock: HeldLock = { path, kind: "file", holder: ownerId, holderType: "run", runId, expiresAt: Number.MAX_SAFE_INTEGER, lastEditAt: now };
+      this.locks.set(path, lock);
+      return publicLock(lock);
+    });
+    return { ok: true, locks: created };
+  }
+
+  releaseRun(runId: string): Lock[] {
+    const released: Lock[] = [];
+    for (const [path, l] of this.locks) {
+      if (l.runId !== runId) continue;
+      this.locks.delete(path);
+      released.push(publicLock(l));
+    }
+    return released;
+  }
+
+  private runLock(path: string, runId: string): HeldLock | undefined {
+    const l = this.locks.get(path);
+    return l?.holderType === "run" && l.runId === runId ? l : undefined;
   }
 
   // --- Support for the Git queue ------------------------------------------------------------
