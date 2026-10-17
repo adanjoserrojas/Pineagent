@@ -61,10 +61,21 @@ export function connectWorkspace(opts: {
   });
 
   socket.on("presence:changed", (m) => {
-    const others = store.get().members.filter((x) => x.userId !== m.userId);
-    store.set({
-      members: m.status === "joined" ? [...others, { userId: m.userId, name: m.name, openPath: m.openPath ?? null }] : others,
-    });
+    const members = store.get().members;
+    const prev = members.find((x) => x.userId === m.userId);
+    const others = members.filter((x) => x.userId !== m.userId);
+    if (m.status === "left") {
+      store.set({ members: others });
+      return;
+    }
+    const member = {
+      userId: m.userId,
+      name: m.name,
+      avatarUrl: m.avatarUrl ?? prev?.avatarUrl ?? null,
+      openPath: m.openPath ?? null,
+    };
+    // Keep list order stable on "updated" so avatars don't jump around.
+    store.set({ members: prev ? members.map((x) => (x.userId === m.userId ? member : x)) : [...others, member] });
   });
 
   return socket;

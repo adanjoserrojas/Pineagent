@@ -7,7 +7,8 @@ export default defineConfig({
   use: { baseURL: "http://localhost:5173", trace: "retain-on-failure" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
-    { command: "npm run mock", port: 3001, reuseExistingServer: !process.env.CI },
+    // MOCK_AVATARS=0 keeps e2e runs off github.com; avatars fall back to initials.
+    { command: "npm run mock", port: 3001, reuseExistingServer: !process.env.CI, env: { MOCK_AVATARS: "0" } },
     { command: "npm run dev:web", port: 5173, reuseExistingServer: !process.env.CI },
   ],
 });

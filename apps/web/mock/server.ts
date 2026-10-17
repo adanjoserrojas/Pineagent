@@ -16,7 +16,7 @@ import {
   type ServerToClientEvents,
 } from "../src/contracts/socket";
 
-type User = { id: string; name: string };
+type User = { id: string; name: string; avatarUrl: string | null };
 type SocketData = { user: User; room?: string; openPath: string | null };
 type MockSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 
@@ -33,11 +33,17 @@ async function listFiles(root: string, dir = root): Promise<string[]> {
   return out.sort();
 }
 
+// The real server takes avatarUrl from githubAvatarUrl(sub). Dev names are treated as GitHub
+// logins (?as=octocat shows octocat's picture); MOCK_AVATARS=0 turns that off.
 function authenticate(token: unknown): User | null {
   if (typeof token !== "string") return null;
-  const m = token.match(/^dev:([a-z0-9_-]{1,32})$/i);
-  return m ? { id: `dev|${m[1].toLowerCase()}`, name: m[1] } : null;
+  const m = token.match(/^dev:([a-z0-9_-]{1,39})$/i);
+  if (!m) return null;
+  const avatarUrl = process.env.MOCK_AVATARS === "0" ? null : `https://github.com/${m[1]}.png?size=64`;
+  return { id: `dev|${m[1].toLowerCase()}`, name: m[1], avatarUrl };
 }
+
+const presenceOf = (user: User) => ({ userId: user.id, name: user.name, avatarUrl: user.avatarUrl });
 
 export async function startMock({ port = 3001 }: { port?: number } = {}) {
   // Each mock instance edits its own temp copy of the fixture, so tests never touch the source tree.
@@ -65,7 +71,7 @@ export async function startMock({ port = 3001 }: { port?: number } = {}) {
     const byUser = new Map<string, Member>();
     for (const s of await io.in(room).fetchSockets()) {
       const { user, openPath } = s.data;
-      byUser.set(user.id, { userId: user.id, name: user.name, openPath });
+      byUser.set(user.id, { userId: user.id, name: user.name, avatarUrl: user.avatarUrl, openPath });
     }
     return [...byUser.values()];
   }
@@ -79,9 +85,16 @@ export async function startMock({ port = 3001 }: { port?: number } = {}) {
       if (socket.data.room && socket.data.room !== room) socket.leave(socket.data.room);
       socket.data.room = room;
       await socket.join(room);
-      const self: Member = { userId: user.id, name: user.name, openPath: socket.data.openPath };
+      const self: Member = { userId: user.id, name: user.name, avatarUrl: user.avatarUrl, openPath: socket.data.openPath };
       ack({ ok: true, self, members: await membersOf(room), locks: [], tree: await listFiles(root) });
-      socket.to(room).emit("presence:changed", { userId: user.id, name: user.name, status: "joined", openPath: self.openPath });
+      socket.to(room).emit("presence:changed", { ...presenceOf(user), status: "joined", openPath: self.openPath });
+    });
+
+    socket.on("presence:update", ({ openPath }) => {
+      const room = socket.data.room;
+      if (!room || (openPath !== null && typeof openPath !== "string")) return;
+      socket.data.openPath = openPath;
+      socket.to(room).emit("presence:changed", { ...presenceOf(user), status: "updated", openPath });
     });
 
     socket.on("disconnect", async () => {
@@ -89,7 +102,7 @@ export async function startMock({ port = 3001 }: { port?: number } = {}) {
       if (!room) return;
       // Only announce "left" when this was the user's last socket in the room (e.g. two tabs).
       const stillHere = (await io.in(room).fetchSockets()).some((s) => s.data.user.id === user.id);
-      if (!stillHere) io.to(room).emit("presence:changed", { userId: user.id, name: user.name, status: "left" });
+      if (!stillHere) io.to(room).emit("presence:changed", { ...presenceOf(user), status: "left" });
     });
   });
 

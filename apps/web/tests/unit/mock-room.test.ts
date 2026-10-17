@@ -38,7 +38,12 @@ describe("mock handshake and room:join", () => {
     const res = await c.emitWithAck("room:join", { wsId: "demo", branch: "main" });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.self).toEqual({ userId: "dev|alice", name: "alice", openPath: null });
+    expect(res.self).toEqual({
+      userId: "dev|alice",
+      name: "alice",
+      avatarUrl: "https://github.com/alice.png?size=64",
+      openPath: null,
+    });
     expect(res.locks).toEqual([]);
     expect(res.tree).toContain("src/auth.ts");
     expect(res.tree).toContain("src/routes/users.ts");
@@ -53,6 +58,22 @@ describe("mock handshake and room:join", () => {
     const res = await b.emitWithAck("room:join", { wsId: "w2", branch: "main" });
     expect(await joined).toMatchObject({ userId: "dev|dave", status: "joined" });
     expect(res.ok && res.members.map((m) => m.userId).sort()).toEqual(["dev|carol", "dev|dave"]);
+  });
+
+  it("broadcasts openPath changes as presence updates", async () => {
+    const a = client("dev:gina");
+    const b = client("dev:hank");
+    await Promise.all([connected(a), connected(b)]);
+    await a.emitWithAck("room:join", { wsId: "w4", branch: "main" });
+    await b.emitWithAck("room:join", { wsId: "w4", branch: "main" });
+    // The "joined" broadcast for hank can still be in flight, so wait for the update specifically.
+    const updated = new Promise((resolve) =>
+      a.on("presence:changed", (m) => {
+        if (m.status === "updated") resolve(m);
+      }),
+    );
+    b.emit("presence:update", { openPath: "src/auth.ts" });
+    expect(await updated).toMatchObject({ userId: "dev|hank", status: "updated", openPath: "src/auth.ts" });
   });
 
   it("keeps branches in separate rooms", async () => {

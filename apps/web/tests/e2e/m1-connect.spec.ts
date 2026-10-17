@@ -1,10 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { startMock } from "../../mock/server";
 
+process.env.MOCK_AVATARS = "0"; // the in-process mock below; keeps the run off github.com
+
 test("dev sign-in connects, joins the room and lists the tree", async ({ page }) => {
   await page.goto("/?as=alice");
   await expect(page.getByTestId("connection")).toHaveText("Connected");
-  await expect(page.getByRole("navigation", { name: "Files" })).toContainText("src/auth.ts");
+  await expect(page.getByRole("tree", { name: "Files" }).locator('[data-path="src/auth.ts"]')).toBeVisible();
   await expect(page.getByRole("list", { name: "People in this branch" }).getByRole("listitem")).toHaveCount(1);
 });
 

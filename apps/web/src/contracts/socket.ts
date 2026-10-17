@@ -18,7 +18,8 @@ export type ErrorCode = "NOT_COLLABORATOR" | "HELD" | "NOT_HOLDER" | "STALE" | "
 // PROPOSED: connect_error `data.code` when the handshake token is missing or invalid.
 export const UNAUTHENTICATED = "UNAUTHENTICATED";
 
-export type Member = { userId: string; name: string; openPath: string | null };
+// PROPOSED: avatarUrl. The server derives it from the Auth0 sub `github|<id>`; null when unknown.
+export type Member = { userId: string; name: string; avatarUrl: string | null; openPath: string | null };
 
 export type RoomJoinAck =
   | { ok: true; self: Member; members: Member[]; locks: Lock[]; tree: string[] } // PROPOSED: self, tree
@@ -44,10 +45,24 @@ export interface ClientToServerEvents {
 }
 
 export interface ServerToClientEvents {
-  "presence:changed": (msg: { userId: string; name: string; status: "joined" | "left"; openPath?: string | null }) => void;
+  // PROPOSED: status "updated" (openPath changed) and avatarUrl.
+  "presence:changed": (msg: {
+    userId: string;
+    name: string;
+    avatarUrl?: string | null;
+    status: "joined" | "left" | "updated";
+    openPath?: string | null;
+  }) => void;
   "lock:changed": (msg: { path: string; kind: Lock["kind"]; lock: Lock | null; reason: LockChangeReason }) => void;
   "file:changed": (msg: { path: string; version: number; ops: Op[]; author: string; source: "editor" | "agent" | "shell" }) => void;
   "tree:changed": (msg: { path: string; change: "add" | "delete" | "rename"; newPath?: string }) => void;
 }
 
 export const roomName = (wsId: string, branch: string) => `ws:${wsId}:${branch}`;
+
+// Auth0's GitHub connection issues subs like "github|583231"; the number is the GitHub user id,
+// which resolves to the profile picture without any extra API call or token claim.
+export function githubAvatarUrl(sub: string, size = 64): string | null {
+  const m = sub.match(/^github\|(\d+)$/);
+  return m ? `https://avatars.githubusercontent.com/u/${m[1]}?s=${size}` : null;
+}
