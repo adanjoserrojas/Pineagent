@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -280,5 +280,51 @@ describe("restart recovery (store written through, memory stays the authority)",
     a.acquire("src/auth.ts", "file", ALICE);
     await a.applyOps("src/auth.ts", ALICE, 1, [{ offset: 0, length: 0, text: "A" }]);
     expect(seen).toEqual(["v2 saved while disk lacked the edit"]);
+  });
+});
+
+describe("creating files and folders (tree:create)", () => {
+  it("makes an empty file, and its missing folders, that the creator can edit and commit", async () => {
+    expect(await ws.create("src/utils/date.ts", "file", ALICE)).toEqual({ ok: true, path: "src/utils/date.ts" });
+    expect(await readFile(join(ws.root, "src/utils/date.ts"), "utf8")).toBe("");
+    expect(await ws.read("src/utils/date.ts")).toEqual({ content: "", version: 1 });
+    expect(ws.editorsOf("src/utils/date.ts")).toEqual([ALICE]);
+    ws.acquire("src/utils/date.ts", "file", ALICE);
+    expect(await ws.applyOps("src/utils/date.ts", ALICE, 1, [{ offset: 0, length: 0, text: "x" }])).toEqual({ ok: true, version: 2 });
+  });
+
+  it("makes a folder, named with a trailing slash like a folder lock", async () => {
+    expect(await ws.create("docs/notes", "dir", ALICE)).toEqual({ ok: true, path: "docs/notes/" });
+    expect((await stat(join(ws.root, "docs/notes"))).isDirectory()).toBe(true);
+    expect(await ws.create("docs/notes/", "dir", BOB)).toEqual({ ok: false, code: "EXISTS" });
+  });
+
+  it("refuses names that exist, escape, touch .git, or sit inside a file", async () => {
+    expect(await ws.create("src/auth.ts", "file", ALICE)).toEqual({ ok: false, code: "EXISTS" });
+    expect(await ws.create("src/auth.ts/inner.ts", "file", ALICE)).toEqual({ ok: false, code: "EXISTS" });
+    for (const bad of ["../escape.ts", "/etc/x", "src/../../x", ".git/hooks/x", "a//b", "a/./b", ""]) {
+      expect(await ws.create(bad, "file", ALICE)).toEqual({ ok: false, code: "INVALID" });
+    }
+  });
+
+  it("won't create through a symlink that leaves the workspace", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "pineagent-outside-"));
+    await symlink(outside, join(ws.root, "out"));
+    expect(await ws.create("out/new/x.ts", "file", ALICE)).toEqual({ ok: false, code: "INVALID" });
+    expect(await stat(join(outside, "new")).catch(() => null)).toBeNull();
+  });
+
+  it("refuses inside a folder someone else holds, but not your own", async () => {
+    ws.acquire("src/routes/", "dir", BOB);
+    expect(await ws.create("src/routes/new.ts", "file", ALICE)).toEqual({ ok: false, code: "LOCKED" });
+    expect(await ws.create("src/routes/new.ts", "file", BOB)).toMatchObject({ ok: true });
+  });
+
+  it("a re-created path continues the old version, so old snapshots go stale", async () => {
+    ws.acquire("README.md", "file", ALICE);
+    await ws.applyOps("README.md", ALICE, 1, [{ offset: 0, length: 0, text: "x" }]);
+    await rm(join(ws.root, "README.md")); // deleted outside the editor; the server still knows v2
+    expect(await ws.create("README.md", "file", ALICE)).toMatchObject({ ok: true });
+    expect(await ws.read("README.md")).toEqual({ content: "", version: 3 });
   });
 });

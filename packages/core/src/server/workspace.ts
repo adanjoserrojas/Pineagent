@@ -1,8 +1,8 @@
 // One branch's shared state: its files, their versions, and the lock table.
 // No sockets here, so the rules can be unit-tested with a fake clock.
-import { readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
-import type { Lock, LockChangeReason, Op } from "../contracts";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
+import type { Lock, LockChangeReason, Op, TreeCreateAck } from "../contracts";
 import { applyOps } from "../ops";
 import type { RoomStore } from "./store";
 
@@ -237,6 +237,40 @@ export class Workspace {
     this.writes.set(path, write);
     await write;
     return { ok: true, version };
+  }
+
+  // A new empty file or folder (`kind: "dir"`, any trailing "/" optional), with missing parent
+  // folders made on the way. The creator counts as the file's editor, so it's theirs to commit.
+  async create(path: string, kind: "file" | "dir", userId: string): Promise<TreeCreateAck> {
+    const bare = typeof path === "string" ? path.replace(/\/+$/, "") : "";
+    const segments = bare.split("/");
+    const full = this.resolvePath(bare);
+    if (!full || segments.some((s) => s === "" || s === "." || s === "..") || bare.length > 400) return { ok: false, code: "INVALID" };
+    const name = kind === "dir" ? `${bare}/` : bare;
+    while (this.gate?.paths === "all") await this.gate.open; // a rebase is rewriting the tree
+    if (this.conflict(name, "file", userId)) return { ok: false, code: "LOCKED" };
+    // The nearest folder that already exists must really be inside the workspace (not a symlink
+    // out of it), or mkdir would create folders wherever that link points.
+    let existing = dirname(full);
+    while (!(await stat(existing).then(() => true, () => false))) existing = dirname(existing);
+    if (existing !== this.root && !(await this.inside(existing))) return { ok: false, code: "INVALID" };
+    try {
+      await mkdir(dirname(full), { recursive: true });
+      if (kind === "dir") await mkdir(full);
+      else await writeFile(full, "", { encoding: "utf8", flag: "wx" });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      return { ok: false, code: code === "EEXIST" || code === "ENOTDIR" ? "EXISTS" : "INVALID" };
+    }
+    if (kind === "file") {
+      // A path that held a file before (deleted, or known from before a restart) continues its
+      // version, so nobody's old snapshot matches the new empty text.
+      const version = (this.files.get(bare)?.version ?? this.restoredVersions.get(bare) ?? 0) + 1;
+      this.files.set(bare, { content: "", version });
+      this.editors.set(bare, new Set([...(this.editors.get(bare) ?? []), userId]));
+      await this.save(`file:${bare}`, "saveFile", (s) => s.saveFile(bare, version, userId));
+    }
+    return { ok: true, path: name };
   }
 
   // --- Agent run locks (the harness keeps them alive, so they never expire) -------------------

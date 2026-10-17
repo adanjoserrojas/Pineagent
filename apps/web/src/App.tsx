@@ -14,6 +14,7 @@ import { workspaceFromPath } from "./routes";
 
 // Monaco is most of the bundle; load it only once a file is opened.
 const EditorPane = lazy(() => import("./editor/EditorPane"));
+const ACK_TIMEOUT_MS = 8000;
 
 function apiUrl() {
   // ?api= lets e2e tests point a page at their own mock instance; dev builds only.
@@ -121,6 +122,11 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
             openPath={openPath}
             loading={ws.connection !== "connected"}
             onOpen={setOpenPath}
+            onCreate={
+              socket && ws.connection === "connected"
+                ? (path, kind) => socket.timeout(ACK_TIMEOUT_MS).emitWithAck("tree:create", { path, kind }).catch(() => null)
+                : undefined
+            }
           />
         </nav>
         <main className="workspace-main">

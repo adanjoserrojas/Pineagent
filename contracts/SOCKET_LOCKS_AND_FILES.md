@@ -47,7 +47,7 @@ C→S events use a Socket.IO acknowledgement. S→room events are broadcasts. A 
 
 | Event | Direction | Payload | Ack / notes |
 | --- | --- | --- | --- |
-| `room:join` | C→S | `{ wsId, branch }` | `{ ok: true, self: Member, members: Member[], locks: Lock[], tree: string[], timing: { heartbeatMs, leaseMs } }` or `{ ok: false, code: "NOT_COLLABORATOR" \| "UNAVAILABLE" }`. `Member = { userId, name, avatarUrl, openPath }`. `wsId` is `"<owner>/<repo>"` for a GitHub repository (no `.`/`..` segments). `NOT_COLLABORATOR` = the user can't push to it (checked with their own GitHub token); `UNAVAILABLE` = not allowlisted, or the clone failed. PROPOSED: `self`, `tree`, `timing`, `avatarUrl`, `UNAVAILABLE`, the `wsId` shape. |
+| `room:join` | C→S | `{ wsId, branch }` | `{ ok: true, self: Member, members: Member[], locks: Lock[], tree: string[], timing: { heartbeatMs, leaseMs } }` or `{ ok: false, code: "NOT_COLLABORATOR" \| "UNAVAILABLE" }`. `Member = { userId, name, avatarUrl, openPath }`. `wsId` is `"<owner>/<repo>"` for a GitHub repository (no `.`/`..` segments). `NOT_COLLABORATOR` = the user can't push to it (checked with their own GitHub token); `UNAVAILABLE` = not allowlisted, or the clone failed. `tree` lists files, plus `"dir/"` entries for folders with nothing Git would track in them (Git doesn't record empty folders). PROPOSED: `self`, `tree`, `timing`, `avatarUrl`, `UNAVAILABLE`, the `wsId` shape, empty-folder entries. |
 | `presence:update` | C→S | `{ openPath: string \| null }` | No ack. |
 | `presence:changed` | S→room | `{ userId, name, avatarUrl?, status: "joined" \| "left" \| "updated", openPath? }` | PROPOSED: `updated` (a member opened another file) and `avatarUrl`. |
 
@@ -67,7 +67,8 @@ C→S events use a Socket.IO acknowledgement. S→room events are broadcasts. A 
 | `file:snapshot` | C→S | `{ path }` | `{ ok: true, path, version, content, hash }`, `{ ok: false, code: "NOT_FOUND" }`, or `{ ok: false, code: "UNSUPPORTED", reason: "binary" \| "too_large" }` (PROPOSED: over 1 MB or contains NUL). Used on open, on a version gap, and after reconnect. Symlinks that resolve outside the worktree are `NOT_FOUND`. |
 | `file:ops` | C→S, at most every 100 ms | `{ path, baseVersion, ops: Op[] }` | `{ ok: true, version }` or `{ ok: false, code: "NOT_HOLDER" \| "STALE", currentVersion }` |
 | `file:changed` | S→room except sender | `{ path, version, ops, author, source: "editor" \| "agent" \| "shell" }` | `shell` = formatter or codegen output detected by the worktree watcher. |
-| `tree:changed` | S→room | `{ path, change: "add" \| "delete" \| "rename", newPath? }` | |
+| `tree:create` | C→S | `{ path, kind: "file" \| "dir" }` | PROPOSED. `{ ok: true, path }` (a folder's path ends with `/`), or `{ ok: false, code: "EXISTS" \| "INVALID" \| "LOCKED" }`. Creates an empty file or folder, and any missing parent folders. `INVALID`: `.`/`..`/empty segments, `.git`, absolute, or through a symlink that leaves the worktree. `LOCKED`: inside a folder held by someone else (or an agent run). The creator becomes the new file's editor, so it is theirs to commit. On success the room gets `tree:changed` with `add`. |
+| `tree:changed` | S→room | `{ path, change: "add" \| "delete" \| "rename", newPath? }` | A folder's path ends with `/`. |
 
 ## Server rules
 

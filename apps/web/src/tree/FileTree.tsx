@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { FileChange, Lock, Member } from "../contracts/socket";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import type { FileChange, Lock, Member, TreeCreateAck } from "../contracts/socket";
 import { Avatar } from "../ui/Avatar";
 import {
   allDirs,
@@ -23,6 +23,16 @@ type Props = {
   openPath: string | null;
   loading: boolean;
   onOpen: (path: string) => void;
+  // Asks the server to make a file or folder; null = no answer. Absent while offline.
+  onCreate?: (path: string, kind: "file" | "dir") => Promise<TreeCreateAck | null>;
+};
+
+type Draft = { kind: "file" | "dir"; value: string; error: string | null; busy: boolean };
+
+const CREATE_ERROR: Record<Exclude<TreeCreateAck, { ok: true }>["code"], string> = {
+  EXISTS: "Something with that name is already there.",
+  INVALID: "That name can’t be used here.",
+  LOCKED: "That folder is locked by someone else right now.",
 };
 
 type Mode = "all" | "changed" | "locked";
@@ -41,8 +51,11 @@ type Item = {
 
 const MAX_VIEWERS = 3;
 
-export function FileTree({ paths, locks, changes, members, selfId, openPath, loading, onOpen }: Props) {
+export function FileTree({ paths, locks, changes, members, selfId, openPath, loading, onOpen, onCreate }: Props) {
   const roots = useMemo(() => buildTree(paths), [paths]);
+  // `paths` also holds "dir/" entries for empty folders; filters and counts are about files.
+  const files = useMemo(() => paths.filter((p) => !p.endsWith("/")), [paths]);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const dirtyDirs = useMemo(() => changedDirs(changes.keys()), [changes]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -54,14 +67,14 @@ export function FileTree({ paths, locks, changes, members, selfId, openPath, loa
 
   const items: Item[] = useMemo(() => {
     if (query.trim()) {
-      return filterPaths(paths, query).map(({ path, start, end }) => flatItem(path, "file", [start, end]));
+      return filterPaths(files, query).map(({ path, start, end }) => flatItem(path, "file", [start, end]));
     }
     if (mode === "changed") {
       // Deleted files aren't in the tree, so this list comes from Git, not from `paths`.
       return [...changes.keys()].sort().map((p) => flatItem(p, "file"));
     }
     if (mode === "locked") {
-      const lockedFiles = paths.filter((p) => isLocked(p, locks));
+      const lockedFiles = files.filter((p) => isLocked(p, locks));
       const lockedDirs = [...locks.values()].filter((l) => l.kind === "dir").map((l) => l.path);
       return [...lockedDirs, ...lockedFiles].sort().map((p) => flatItem(p, p.endsWith("/") ? "dir" : "file"));
     }
@@ -72,21 +85,22 @@ export function FileTree({ paths, locks, changes, members, selfId, openPath, loa
       name: node.name,
       depth,
     }));
-  }, [paths, roots, locks, changes, collapsed, query, mode]);
+  }, [files, roots, locks, changes, collapsed, query, mode]);
 
   const focused = items.some((i) => i.path === focusPath) ? focusPath : (items[0]?.path ?? null);
 
   useEffect(() => {
-    if (!moveFocus.current || !focused) return;
+    // Wait for the row itself: a just-created path arrives with the room's tree:changed.
+    if (!moveFocus.current || !focused || focused !== focusPath) return;
     moveFocus.current = false;
     rowRefs.current.get(focused)?.focus();
-  }, [focused]);
+  }, [focused, focusPath]);
 
   const viewersOf = (path: string) => members.filter((m) => m.userId !== selfId && m.openPath === path);
   const counts: Record<Mode, number | null> = {
     all: null,
     changed: changes.size,
-    locked: paths.filter((p) => isLocked(p, locks)).length,
+    locked: files.filter((p) => isLocked(p, locks)).length,
   };
   const inTree = !query.trim() && mode === "all";
 
@@ -98,6 +112,43 @@ export function FileTree({ paths, locks, changes, members, selfId, openPath, loa
       else next.add(dir);
       return next;
     });
+  }
+
+  // New things go in the folder you last picked: that folder itself, or the one holding that file.
+  function startCreate(kind: Draft["kind"]) {
+    const picked = focusPath ?? openPath;
+    const dir = !picked ? "" : picked.endsWith("/") ? picked : (parentDir(picked) ?? "");
+    setQuery("");
+    setMode("all");
+    setDraft({ kind, value: dir, error: null, busy: false });
+  }
+
+  async function submitCreate(e: FormEvent) {
+    e.preventDefault();
+    if (!draft || draft.busy || !onCreate) return;
+    const path = draft.value.trim();
+    if (!path || (draft.kind === "file" && path.endsWith("/"))) {
+      return setDraft({ ...draft, error: draft.kind === "file" ? "Type a file name, like notes.md." : "Type a folder name." });
+    }
+    setDraft({ ...draft, busy: true, error: null });
+    const res = await onCreate(path, draft.kind);
+    if (!res || !res.ok) {
+      return setDraft({ ...draft, busy: false, error: res ? CREATE_ERROR[res.code] : "The server didn’t answer. Try again." });
+    }
+    setDraft(null);
+    // Show where it landed: open every folder on the way down.
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      for (let d = res.path.endsWith("/") ? res.path : parentDir(res.path); d; d = parentDir(d)) next.delete(d);
+      return next;
+    });
+    // A new file opens in the editor, so leave keyboard focus alone; a new folder gets the focus.
+    if (draft.kind === "file") {
+      setFocusPath(res.path);
+      onOpen(res.path);
+    } else {
+      focusItem(res.path);
+    }
   }
 
   function focusItem(path: string | undefined) {
@@ -166,6 +217,12 @@ export function FileTree({ paths, locks, changes, members, selfId, openPath, loa
     <div className="explorer" onKeyDown={onExplorerKeyDown}>
       <div className="explorer-head">
         <h2 className="section-label">Explorer</h2>
+        <button type="button" className="icon-btn" aria-label="New file" title="New file" disabled={!onCreate} onClick={() => startCreate("file")}>
+          <NewFileIcon />
+        </button>
+        <button type="button" className="icon-btn" aria-label="New folder" title="New folder" disabled={!onCreate} onClick={() => startCreate("dir")}>
+          <NewFolderIcon />
+        </button>
         <button type="button" className="icon-btn" aria-label="Expand all folders" onClick={() => setCollapsed(new Set())}>
           <Chevrons up={false} />
         </button>
@@ -217,6 +274,35 @@ export function FileTree({ paths, locks, changes, members, selfId, openPath, loa
           </button>
         ))}
       </div>
+
+      {draft && (
+        <form className="explorer-create" onSubmit={submitCreate}>
+          <label className="explorer-filter">
+            {draft.kind === "dir" ? <NewFolderIcon /> : <NewFileIcon />}
+            <span className="sr-only">{draft.kind === "dir" ? "New folder path" : "New file path"}</span>
+            <input
+              autoFocus
+              className="mono"
+              value={draft.value}
+              disabled={draft.busy}
+              spellCheck={false}
+              aria-invalid={Boolean(draft.error)}
+              aria-describedby="explorer-create-hint"
+              placeholder={draft.kind === "dir" ? "src/components" : "src/notes.md"}
+              onChange={(e) => setDraft({ ...draft, value: e.target.value, error: null })}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setDraft(null);
+              }}
+            />
+          </label>
+          <p id="explorer-create-hint" className={draft.error ? "create-hint create-error" : "create-hint"} role={draft.error ? "alert" : undefined}>
+            {draft.error ??
+              (draft.kind === "dir"
+                ? "Enter to create, Esc to cancel. Git saves a folder once it has a file in it."
+                : "Enter to create, Esc to cancel. Use / for folders: src/utils/date.ts")}
+          </p>
+        </form>
+      )}
 
       {loading && paths.length === 0 ? (
         <p className="explorer-note" aria-busy="true">
@@ -361,6 +447,24 @@ function LockBadge({
       )}
       {label}
     </span>
+  );
+}
+
+function NewFileIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5M12 12v6M9 15h6" />
+    </svg>
+  );
+}
+
+function NewFolderIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <path d="M12 10v6M9 13h6" />
+    </svg>
   );
 }
 

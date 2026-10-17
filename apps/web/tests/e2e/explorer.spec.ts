@@ -99,3 +99,43 @@ test("uncommitted changes show an M on the file and a dot on its folders, for ev
   await expect(row(page, "src/auth.ts").getByTestId("git-status")).toHaveCount(0);
   await bob.context().close();
 });
+
+test("creates a file and a folder from the explorer, and others see them", async ({ page, browser }) => {
+  await page.goto(home("alice"));
+  const bob = await (await browser.newContext()).newPage();
+  await bob.goto(home("bob"));
+  await expect(row(page, "src/auth.ts")).toBeVisible();
+  await expect(row(bob, "src/auth.ts")).toBeVisible();
+
+  // A new file, folders included, opens in the editor and is marked as added.
+  await page.getByRole("button", { name: "New file" }).click();
+  const field = page.getByRole("textbox", { name: "New file path" });
+  await expect(field).toBeFocused();
+  await field.fill("src/utils/date.ts");
+  await field.press("Enter");
+  await expect(row(page, "src/utils/date.ts")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "src/utils/date.ts" })).toBeVisible();
+  await expect(row(page, "src/utils/date.ts").getByTestId("git-status")).toHaveText(/A/);
+  await expect(row(bob, "src/utils/date.ts")).toBeVisible();
+
+  // A new folder goes inside the folder you picked; the same name twice is refused.
+  await row(page, "src/routes/").click();
+  await page.getByRole("button", { name: "New folder" }).click();
+  const dirField = page.getByRole("textbox", { name: "New folder path" });
+  await expect(dirField).toHaveValue("src/routes/");
+  await dirField.pressSequentially("v2");
+  await dirField.press("Enter");
+  await expect(row(page, "src/routes/v2/")).toBeVisible();
+  await expect(row(bob, "src/routes/v2/")).toBeVisible();
+
+  await page.getByRole("button", { name: "New folder" }).click();
+  await page.getByRole("textbox", { name: "New folder path" }).fill("src/routes/v2");
+  await page.getByRole("textbox", { name: "New folder path" }).press("Enter");
+  await expect(page.getByRole("navigation", { name: "Explorer" }).getByRole("alert")).toHaveText("Something with that name is already there.");
+  await page.getByRole("textbox", { name: "New folder path" }).press("Escape");
+  await expect(page.getByRole("textbox", { name: "New folder path" })).toHaveCount(0);
+
+  // The empty folder is still there after a reload, even though Git doesn't track it.
+  await page.reload();
+  await expect(row(page, "src/routes/v2/")).toBeVisible();
+});
