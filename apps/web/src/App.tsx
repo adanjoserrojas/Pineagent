@@ -9,15 +9,11 @@ import { createWorkspaceStore, useWorkspace } from "./state/workspace";
 import { FileTree } from "./tree/FileTree";
 import { Avatar } from "./ui/Avatar";
 import { ConnectionPill } from "./ui/ConnectionPill";
+import { RepoPicker } from "./ui/RepoPicker";
+import { workspaceFromPath } from "./routes";
 
 // Monaco is most of the bundle; load it only once a file is opened.
 const EditorPane = lazy(() => import("./editor/EditorPane"));
-
-// URL shape: /ws/<wsId>/<branch>. Anything else opens the mock's demo workspace.
-function workspaceFromUrl() {
-  const m = window.location.pathname.match(/^\/ws\/([^/]+)\/(.+)$/);
-  return m ? { wsId: decodeURIComponent(m[1]), branch: decodeURIComponent(m[2]) } : { wsId: "demo", branch: "main" };
-}
 
 function apiUrl() {
   // ?api= lets e2e tests point a page at their own mock instance; dev builds only.
@@ -26,8 +22,12 @@ function apiUrl() {
 }
 
 export function App() {
+  const target = useMemo(() => workspaceFromPath(window.location.pathname, DEV_TOOLS), []);
+  return target ? <WorkspaceApp {...target} /> : <RepoPicker />;
+}
+
+function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
   const session = useSession();
-  const { wsId, branch } = useMemo(workspaceFromUrl, []);
   const store = useMemo(createWorkspaceStore, []);
   const ws = useWorkspace(store);
   const [socket, setSocket] = useState<WorkspaceSocket | null>(null);

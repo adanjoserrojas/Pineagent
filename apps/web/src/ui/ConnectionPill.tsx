@@ -7,6 +7,7 @@ const LABELS: Record<ConnectionStatus, string> = {
   offline: "Offline · edits paused",
   unauthenticated: "Signed out · sign in again",
   forbidden: "No access to this repository",
+  unavailable: "Couldn’t open this repository",
 };
 
 // When the server turns the token down, the pill is the way back in.

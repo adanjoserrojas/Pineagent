@@ -1,7 +1,7 @@
 // Branch-wide working-tree status for the explorer's M/A/D letters (contracts/GIT_QUEUE.md,
 // `git:changes`). Anything that can touch the worktree pokes it; one `git status` runs per burst
 // and the room only hears about it when the set actually changed.
-import type { FileChange } from "../src/contracts/socket";
+import type { FileChange } from "../contracts";
 import type { GitRepo } from "./git";
 
 export class ChangeFeed {
@@ -20,6 +20,19 @@ export class ChangeFeed {
     return (await this.repo.status())
       .map(({ path, status }) => ({ path, status }))
       .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
+
+  // The list for someone joining. When it isn't what the room last heard (the first join after a
+  // start, with work already in the tree), the room hears it too, so the next change is compared
+  // with what clients actually have.
+  async forJoin(): Promise<FileChange[]> {
+    const changes = await this.current();
+    const key = JSON.stringify(changes);
+    if (key !== this.last && !this.closed) {
+      this.last = key;
+      this.emit(changes);
+    }
+    return changes;
   }
 
   poke() {

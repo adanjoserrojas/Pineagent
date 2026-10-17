@@ -55,7 +55,7 @@ button { font: inherit; }
 .pill-connected { background: #15281f; color: #8ce6ba; }
 .pill-connecting, .pill-reconnecting { background: #2a1f10; color: #f7d2aa; }
 .pill-offline { background: #1e2422; color: #c7d3e2; }
-.pill-unauthenticated, .pill-forbidden { background: #2b1418; color: #ffc4cc; }
+.pill-unauthenticated, .pill-forbidden, .pill-unavailable { background: #2b1418; color: #ffc4cc; }
 .pill-action { border: 1px solid #5a2a32; font: inherit; cursor: pointer; }
 .pill-action:hover { border-color: var(--danger); }
 
@@ -299,3 +299,10 @@ button { font: inherit; }
 .signin-error { color: var(--danger); }
 .btn-primary { height: 44px; border: 0; border-radius: 10px; background: var(--action); color: var(--on-action); font-weight: 600; cursor: pointer; }
 :focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
+.repo-picker { display: flex; flex-direction: column; gap: 12px; }
+.repo-picker label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.repo-picker input {
+  height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  color: var(--text); font: 14px var(--mono);
+}
+.repo-picker input:focus { outline: none; border-color: #2f4a66; }

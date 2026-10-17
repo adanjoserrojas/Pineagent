@@ -10,3 +10,7 @@ docs/*
 
 
 
+
+# npm workspaces install at the root
+node_modules/
+.DS_Store

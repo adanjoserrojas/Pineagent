@@ -1,0 +1,232 @@
+#!/bin/bash
+# First-boot setup for the Pineagent server (Amazon Linux 2023), run by cloud-init as root.
+# Terraform fills in $${...} placeholders; plain $VAR is bash. Output goes to
+# /var/log/pineagent-bootstrap.log, the first place to look when something is missing.
+set -euo pipefail
+exec > >(tee -a /var/log/pineagent-bootstrap.log) 2>&1
+echo "bootstrap start $(date -Is)"
+
+dnf install -y git docker xz tar openssl
+
+# --- Node.js 22 LTS from nodejs.org, checked against the published SHA-256 ---------------------
+NODE_BASE=https://nodejs.org/dist/latest-v22.x
+cd /tmp
+curl -fsSL "$NODE_BASE/SHASUMS256.txt" -o SHASUMS256.txt
+NODE_TAR=$(awk '/linux-x64\.tar\.xz$/ {print $2}' SHASUMS256.txt)
+curl -fsSLO "$NODE_BASE/$NODE_TAR"
+grep " $NODE_TAR\$" SHASUMS256.txt | sha256sum -c -
+tar -xJf "$NODE_TAR" -C /usr/local --strip-components=1
+node --version
+
+# --- Docker (per-user containers come in phase 4) ---------------------------------------------
+systemctl enable --now docker
+
+# --- The service account: the server runs as this user, never as root -------------------------
+id pineagent >/dev/null 2>&1 || useradd --system --create-home --shell /sbin/nologin pineagent
+
+# --- Data volume at /workspaces ---------------------------------------------------------------
+# Nitro instances show EBS volumes as NVMe disks with unpredictable names (/dev/nvme1n1 ...), so
+# find ours by its volume ID. The attachment can land a little after boot, hence the wait.
+DEV="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${replace(data_volume_id, "-", "")}"
+for _ in $(seq 1 60); do [ -e "$DEV" ] && break; sleep 5; done
+[ -e "$DEV" ] || { echo "data volume never appeared"; exit 1; }
+# Format only a blank disk. On a rebuilt instance the volume already has the repos on it.
+blkid "$DEV" >/dev/null || mkfs.xfs "$DEV"
+UUID=$(blkid -s UUID -o value "$DEV")
+mkdir -p /workspaces
+# nofail: if the volume is ever missing, the machine still boots and you can get in to fix it.
+grep -q "$UUID" /etc/fstab || echo "UUID=$UUID /workspaces xfs defaults,nofail 0 2" >> /etc/fstab
+mount -a
+chown pineagent:pineagent /workspaces
+
+# --- Placeholder until the real server is deployed (phase 3) ----------------------------------
+# Answers /health so the infrastructure can be tested on its own. Localhost only: from outside,
+# everything goes through Caddy.
+# The code lives in its own file: systemd rewrites escapes like \n inside ExecStart= lines.
+mkdir -p /opt/pineagent
+cat > /opt/pineagent/placeholder.js <<'JS'
+require("http")
+  .createServer((req, res) => {
+    const ok = req.url === "/health";
+    res.writeHead(ok ? 200 : 404, { "content-type": "text/plain" });
+    res.end(ok ? "ok (placeholder)\n" : "not found\n");
+  })
+  .listen(3001, "127.0.0.1");
+JS
+cat > /etc/systemd/system/pineagent-placeholder.service <<'UNIT'
+[Unit]
+Description=Pineagent placeholder health endpoint
+After=network-online.target
+
+[Service]
+User=pineagent
+ExecStart=/usr/local/bin/node /opt/pineagent/placeholder.js
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now pineagent-placeholder
+
+# --- The workspace server (services/api), installed from releases ---------------------------
+# Releases unpack to /opt/pineagent/releases/<sha>; /opt/pineagent/current points at the live one.
+install -d -o pineagent -g pineagent -m 755 /workspaces/repos
+install -d -o pineagent -g pineagent -m 700 /workspaces/.pineagent
+mkdir -p /opt/pineagent/releases /opt/pineagent/bin
+
+# The server's identity at Auth0 (private_key_jwt). Generated here, on the data volume, so it
+# survives rebuilds and never exists anywhere else; only the public half is registered in Auth0.
+KEY=/workspaces/.pineagent/auth0-m2m.key
+if [ ! -f "$KEY" ]; then
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$KEY"
+fi
+chown pineagent:pineagent "$KEY"
+chmod 600 "$KEY"
+openssl pkey -in "$KEY" -pubout -out /workspaces/.pineagent/auth0-m2m.pub.pem
+chmod 644 /workspaces/.pineagent/auth0-m2m.pub.pem
+
+cat > /etc/systemd/system/pineagent-api.service <<'UNIT'
+[Unit]
+Description=Pineagent workspace server
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/pineagent/current/api/server.mjs
+
+[Service]
+User=pineagent
+Group=pineagent
+EnvironmentFile=/opt/pineagent/current/api.env
+Environment=HOME=/workspaces/.pineagent
+ExecStart=/usr/local/bin/node --enable-source-maps /opt/pineagent/current/api/server.mjs
+Restart=always
+RestartSec=2
+# The server can write only the workspaces; the rest of the system is read-only to it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/workspaces
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# Installs one release and switches to it; if it doesn't answer /health with its own sha within
+# 30 s, switches back to the previous release. Used by deploys (over SSM) and on first boot.
+cat > /opt/pineagent/bin/install-release <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+SHA="$1"
+WANT_SUM="$${2:-}"
+DIR="/opt/pineagent/releases/$SHA"
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+aws s3 cp --region "${region}" --only-show-errors "s3://${release_bucket}/releases/$SHA.tgz" "$TMP/release.tgz"
+if [ -n "$WANT_SUM" ]; then echo "$WANT_SUM  $TMP/release.tgz" | sha256sum -c -; fi
+rm -rf "$DIR.tmp" && mkdir -p "$DIR.tmp"
+tar -xzf "$TMP/release.tgz" -C "$DIR.tmp"
+chmod -R a+rX "$DIR.tmp"
+rm -rf "$DIR" && mv "$DIR.tmp" "$DIR"
+PREV=$(readlink -f /opt/pineagent/current || true)
+switch() { ln -sfn "$1" /opt/pineagent/current.new && mv -Tf /opt/pineagent/current.new /opt/pineagent/current; }
+switch "$DIR"
+systemctl disable --now pineagent-placeholder 2>/dev/null || true
+systemctl enable pineagent-api >/dev/null 2>&1
+systemctl restart pineagent-api
+for _ in $(seq 1 30); do
+  if curl -fsS localhost:3001/health 2>/dev/null | grep -q "\"sha\":\"$SHA\""; then echo "installed $SHA"; exit 0; fi
+  sleep 1
+done
+echo "release $SHA failed its health check:" >&2
+journalctl -u pineagent-api -n 20 --no-pager -o cat >&2 || true
+if [ -n "$PREV" ] && [ "$PREV" != "$DIR" ]; then
+  switch "$PREV"
+  systemctl restart pineagent-api
+  echo "rolled back to $(basename "$PREV")" >&2
+else
+  systemctl stop pineagent-api
+  systemctl enable --now pineagent-placeholder
+fi
+exit 1
+SCRIPT
+chmod 755 /opt/pineagent/bin/install-release
+systemctl daemon-reload
+
+# A rebuilt instance comes back on the last deployed release by itself.
+LATEST=$(aws s3 cp --region "${region}" --only-show-errors "s3://${release_bucket}/latest.txt" - 2>/dev/null || true)
+if [ -n "$LATEST" ]; then /opt/pineagent/bin/install-release "$LATEST" || echo "could not install $LATEST"; fi
+%{ if domain_name != "" ~}
+
+# --- Caddy: HTTPS for ${domain_name} ---------------------------------------------------------
+# Terminates TLS with a Let's Encrypt certificate it obtains and renews itself, redirects http to
+# https, serves the web app, and proxies Socket.IO (WebSockets included) to Node on localhost.
+CADDY_TAR=caddy_${caddy_version}_linux_amd64.tar.gz
+CADDY_BASE=https://github.com/caddyserver/caddy/releases/download/v${caddy_version}
+cd /tmp
+curl -fsSLO "$CADDY_BASE/$CADDY_TAR"
+curl -fsSLO "$CADDY_BASE/caddy_${caddy_version}_checksums.txt"
+sha512sum -c --ignore-missing "caddy_${caddy_version}_checksums.txt"
+tar -xzf "$CADDY_TAR" -C /usr/local/bin caddy
+caddy version
+
+id caddy >/dev/null 2>&1 || useradd --system --home-dir /var/lib/caddy --create-home --shell /sbin/nologin caddy
+# Certificates live on the data volume, so a rebuilt instance reuses them instead of asking
+# Let's Encrypt again (it allows only 5 identical certificates a week).
+install -d -o caddy -g caddy -m 700 /workspaces/.caddy
+mkdir -p /etc/caddy
+# The web app and the server on one origin: no CORS, one certificate.
+cat > /etc/caddy/Caddyfile <<'CADDY'
+${domain_name} {
+	encode
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+	}
+	@backend path /socket.io/* /health
+	handle @backend {
+		reverse_proxy 127.0.0.1:3001
+	}
+	handle {
+		root * /opt/pineagent/current/web
+		# Built assets have hashed names and never change; everything else (index.html, served for
+		# every app route) must be re-checked so a deploy shows up on the next reload.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@pages not path /assets/*
+		header @pages Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}
+CADDY
+
+cat > /etc/systemd/system/caddy.service <<'UNIT'
+[Unit]
+Description=Caddy (HTTPS for Pineagent)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=caddy
+Group=caddy
+Environment=XDG_DATA_HOME=/workspaces/.caddy XDG_CONFIG_HOME=/var/lib/caddy/config
+ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --force
+# Binding ports 80 and 443 normally needs root; this grants just that one ability.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now caddy
+%{ endif ~}
+
+echo "bootstrap done $(date -Is)"

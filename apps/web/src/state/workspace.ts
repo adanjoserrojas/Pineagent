@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import type { FileChange, GitJob, GitResult, LeaseTiming, Lock, Member, RunView } from "../contracts/socket";
 import type { TeamEvent } from "../runs/runs";
 
-export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline" | "unauthenticated" | "forbidden";
+export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline" | "unauthenticated" | "forbidden" | "unavailable";
 
 export type WorkspaceState = {
   connection: ConnectionStatus;

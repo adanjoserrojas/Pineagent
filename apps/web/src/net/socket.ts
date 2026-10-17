@@ -35,7 +35,7 @@ export function connectWorkspace(opts: {
     try {
       const res: RoomJoinAck = await socket.timeout(JOIN_TIMEOUT_MS).emitWithAck("room:join", { wsId: opts.wsId, branch: opts.branch });
       if (!res.ok) {
-        store.set({ connection: "forbidden" });
+        store.set({ connection: res.code === "UNAVAILABLE" ? "unavailable" : "forbidden" });
         return;
       }
       store.set({
