@@ -32,7 +32,7 @@ async function openAs(browser: Browser, name: string): Promise<Page> {
   const page = await context.newPage();
   await page.goto(`/?as=${name}&api=http://localhost:${mock.port}`);
   await page.locator(`[data-path="${PATH}"]`).click();
-  await expect(page.locator(".monaco-editor .view-lines")).toContainText("currentUser");
+  await expect(page.locator(".monaco-editor .view-lines")).toContainText("currentUser", { timeout: 15_000 }); // first Monaco load can be slow
   await expect(status(page)).toContainText("Viewing");
   return page;
 }

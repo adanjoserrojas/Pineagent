@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { home } from "./rooms";
 import { startMock } from "../../mock/server";
 
 process.env.MOCK_AVATARS = "0";
@@ -7,7 +8,7 @@ const row = (page: Page, path: string) => page.getByRole("tree", { name: "Files"
 const code = (page: Page) => page.locator(".monaco-editor .view-lines");
 
 test("fast switches keep the same editor and never flash a loading state", async ({ page }) => {
-  await page.goto("/?as=alice");
+  await page.goto(home("alice"));
   await row(page, "src/auth.ts").click();
   await expect(code(page)).toContainText("currentUser");
 
@@ -36,7 +37,7 @@ test("a slow load dims the previous file, then shows the new one", async ({ page
   const mock = await startMock({ port: 0, snapshotDelayMs: 900 });
   await page.goto(`/?as=alice&api=http://localhost:${mock.port}`);
   await row(page, "src/auth.ts").click();
-  await expect(code(page)).toContainText("currentUser", { timeout: 5000 });
+  await expect(code(page)).toContainText("currentUser", { timeout: 15_000 }); // cold Monaco + 900 ms server
 
   await row(page, "src/db.ts").click();
   await expect(page.locator(".editor-loading")).toHaveText("Loading src/db.ts…");
@@ -45,6 +46,6 @@ test("a slow load dims the previous file, then shows the new one", async ({ page
 
   // Revisiting a cached file is instant even though the server is still slow.
   await row(page, "src/auth.ts").click();
-  await expect(code(page)).toContainText("currentUser", { timeout: 200 });
+  await expect(code(page)).toContainText("currentUser", { timeout: 500 }); // server takes 900 ms, so this proves the cache
   await mock.close();
 });

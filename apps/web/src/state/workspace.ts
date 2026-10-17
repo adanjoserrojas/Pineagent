@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { LeaseTiming, Lock, Member } from "../contracts/socket";
+import type { GitJob, GitResult, LeaseTiming, Lock, Member } from "../contracts/socket";
 
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline" | "unauthenticated" | "forbidden";
 
@@ -10,6 +10,8 @@ export type WorkspaceState = {
   locks: Map<string, Lock>;
   tree: string[];
   timing: LeaseTiming | null;
+  gitQueue: GitJob[];
+  lastGitResult: GitResult | null;
 };
 
 const initial: WorkspaceState = {
@@ -19,6 +21,8 @@ const initial: WorkspaceState = {
   locks: new Map(),
   tree: [],
   timing: null,
+  gitQueue: [],
+  lastGitResult: null,
 };
 
 // Tiny external store: React reads it through useSyncExternalStore; socket handlers write it.

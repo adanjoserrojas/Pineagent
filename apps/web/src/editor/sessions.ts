@@ -83,6 +83,17 @@ export class SessionManager {
     this.sessions.get(path)?.leave();
   }
 
+  // Resolves true once every listed file's typed edits are acknowledged, false on timeout.
+  // Used before committing so the last keystrokes are in the commit.
+  async whenSaved(paths: string[], timeoutMs = 3000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (paths.some((p) => this.sessions.get(p)?.hasUnsent())) {
+      if (Date.now() > deadline) return false;
+      await new Promise((r) => setTimeout(r, FLUSH_MS / 2));
+    }
+    return true;
+  }
+
   dispose() {
     clearInterval(this.flushTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);

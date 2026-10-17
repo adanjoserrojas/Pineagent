@@ -107,6 +107,11 @@ export class FileSession {
     this.releaseIfDone();
   }
 
+  // Typed edits the server hasn't acknowledged yet (queued, in flight, or waiting for the lock).
+  hasUnsent(): boolean {
+    return this.pending.length > 0 || this.inflight !== null;
+  }
+
   // Give the lock back but keep the file open; typing again re-acquires it.
   release() {
     this.releaseRequested = true;

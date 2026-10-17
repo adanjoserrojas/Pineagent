@@ -61,6 +61,17 @@ export function connectWorkspace(opts: {
     else store.set({ connection: socket.active ? "reconnecting" : "offline" });
   });
 
+  socket.on("git:queue", ({ jobs }) => store.set({ gitQueue: jobs }));
+  socket.on("git:result", (result) => store.set({ lastGitResult: result }));
+
+  // A rebase can add or delete files under everyone.
+  socket.on("tree:changed", ({ path, change, newPath }) => {
+    const tree = store.get().tree.filter((p) => p !== path);
+    if (change === "add") tree.push(path);
+    if (change === "rename" && newPath) tree.push(newPath);
+    store.set({ tree: tree.sort() });
+  });
+
   // A new Map each time, so subscribers can tell the lock table changed by reference.
   socket.on("lock:changed", (m) => {
     const locks = new Map(store.get().locks);

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useSession } from "./auth/AuthGate";
 import { SessionManager } from "./editor/sessions";
+import { CommitDialog } from "./git/CommitDialog";
 import { connectWorkspace, type WorkspaceSocket } from "./net/socket";
 import { createWorkspaceStore, useWorkspace } from "./state/workspace";
 import { FileTree } from "./tree/FileTree";
@@ -29,6 +30,7 @@ export function App() {
   const ws = useWorkspace(store);
   const [socket, setSocket] = useState<WorkspaceSocket | null>(null);
   const [openPath, setOpenPath] = useState<string | null>(null);
+  const [commitOpen, setCommitOpen] = useState(false);
 
   useEffect(() => {
     const s = connectWorkspace({ apiUrl: apiUrl(), wsId, branch, getToken: session.getToken, store });
@@ -84,8 +86,28 @@ export function App() {
           ))}
         </ul>
         <ConnectionPill status={ws.connection} />
+        <button
+          type="button"
+          className="topbar-btn"
+          disabled={ws.connection !== "connected"}
+          onClick={() => setCommitOpen(true)}
+        >
+          Commit…
+        </button>
         <span className="who">{ws.self?.name ?? session.displayName}</span>
       </header>
+      {socket && (
+        <CommitDialog
+          open={commitOpen}
+          onClose={() => setCommitOpen(false)}
+          socket={socket}
+          manager={manager}
+          selfId={ws.self?.userId ?? null}
+          members={ws.members}
+          queue={ws.gitQueue}
+          lastResult={ws.lastGitResult}
+        />
+      )}
       <div className="body">
         <nav className="tree" aria-label="Explorer">
           <FileTree

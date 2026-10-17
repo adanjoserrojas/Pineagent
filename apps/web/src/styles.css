@@ -163,6 +163,46 @@ button { font: inherit; }
 .held-toast strong { color: #f7d2aa; font-weight: 600; }
 .link-btn { border: 0; background: none; color: var(--you-text); font: inherit; font-size: 12px; cursor: pointer; padding: 4px; }
 .link-btn:hover { text-decoration: underline; }
+/* Commit dialog */
+.commit-dialog {
+  width: min(600px, calc(100% - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--panel); color: var(--text); box-shadow: 0 24px 64px rgb(0 0 0 / 0.6);
+}
+.commit-dialog::backdrop { background: rgb(7 10 9 / 0.72); }
+.commit-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.commit-head h2 { flex: 1 1 auto; margin: 0; font-size: 17px; font-weight: 600; }
+.commit-body { display: flex; flex-direction: column; gap: 18px; padding: 18px 20px; max-height: 65vh; overflow-y: auto; }
+.commit-group { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 6px; }
+.commit-group legend, .commit-group h3 {
+  margin: 0; padding: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted);
+}
+.commit-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.commit-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; }
+.commit-row-mine { background: var(--ground); cursor: pointer; }
+.commit-row-mine input { width: 18px; height: 18px; accent-color: var(--you); }
+.commit-row-other { border: 1px dashed var(--line); color: var(--muted); min-height: 36px; }
+.commit-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-counts { font-size: 12px; }
+.commit-counts .plus { color: #8ce6ba; }
+.commit-counts .minus { color: var(--other-text); }
+.commit-reason { font-size: 12px; white-space: nowrap; }
+.commit-message { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.commit-message textarea {
+  resize: vertical; padding: 10px 12px; border: 1px solid #2f4a66; border-radius: 8px; background: var(--ground);
+  color: var(--text); font: 14px var(--sans);
+}
+.commit-queue { display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--ground); color: var(--muted); font-size: 13px; }
+.queue-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--action); }
+.queue-busy { background: var(--other); }
+.commit-note { margin: 0; color: var(--muted); font-size: 13px; }
+.commit-problem { margin: 0; padding: 10px 12px; border: 1px solid #6b4a22; border-radius: 8px; background: #20170d; color: #f7d2aa; font-size: 13px; }
+.commit-problem p { margin: 0; }
+.commit-success { margin: 0; padding: 10px 12px; border-radius: 8px; background: #15281f; color: #8ce6ba; font-size: 13px; }
+.commit-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--line); }
+.commit-hint { flex: 1 1 240px; color: #7f9187; font-size: 12px; line-height: 18px; }
+.commit-btn { height: 40px; padding: 0 16px; }
+.btn-primary:disabled, .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+.topbar-btn { height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; }
 .btn-secondary { height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); cursor: pointer; }
 
 .center-note { margin: 30vh auto; text-align: center; color: var(--muted); }

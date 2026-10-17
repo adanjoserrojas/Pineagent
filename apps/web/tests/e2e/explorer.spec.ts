@@ -1,10 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
+import { home } from "./rooms";
 
 const tree = (page: Page) => page.getByRole("tree", { name: "Files" });
 const row = (page: Page, path: string) => tree(page).locator(`[data-path="${path}"]`);
 
 test("shows nested folders and collapses them with the keyboard", async ({ page }) => {
-  await page.goto("/?as=alice");
+  await page.goto(home("alice"));
   await expect(row(page, "src/routes/users.ts")).toBeVisible();
   await expect(row(page, "src/routes/users.ts")).toHaveAttribute("aria-level", "3");
 
@@ -22,7 +23,7 @@ test("shows nested folders and collapses them with the keyboard", async ({ page 
 });
 
 test("filters with / and opens the first match with Enter", async ({ page }) => {
-  await page.goto("/?as=alice");
+  await page.goto(home("alice"));
   await expect(row(page, "src/auth.ts")).toBeVisible();
   await tree(page).locator('[tabindex="0"]').focus();
   await page.keyboard.press("/");
@@ -35,7 +36,7 @@ test("filters with / and opens the first match with Enter", async ({ page }) => 
 });
 
 test("opening a file loads its contents and switching files swaps them", async ({ page }) => {
-  await page.goto("/?as=alice");
+  await page.goto(home("alice"));
   await row(page, "src/auth.ts").click();
   const code = page.locator(".monaco-editor .view-lines");
   await expect(code).toContainText("currentUser");
@@ -47,9 +48,9 @@ test("opening a file loads its contents and switching files swaps them", async (
 });
 
 test("another person's open file shows their avatar on the row", async ({ page, browser }) => {
-  await page.goto("/?as=alice");
+  await page.goto(home("alice"));
   const bob = await (await browser.newContext()).newPage();
-  await bob.goto("/?as=bob");
+  await bob.goto(home("bob"));
   await expect(row(bob, "src/auth.ts")).toBeVisible();
 
   await row(page, "src/auth.ts").click();

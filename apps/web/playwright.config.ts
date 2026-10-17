@@ -9,6 +9,8 @@ export default defineConfig({
   testDir: "tests/e2e",
   fullyParallel: false,
   retries: 0,
+  // Several browsers loading Monaco cold from the Vite dev server can take longer than the 5 s default.
+  expect: { timeout: 10_000 },
   use: { baseURL: `http://localhost:${WEB_PORT}`, trace: "retain-on-failure" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
