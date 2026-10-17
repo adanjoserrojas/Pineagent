@@ -1,0 +1,66 @@
+import { io, type Socket } from "socket.io-client";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startMock } from "../../mock/server";
+import type { ClientToServerEvents, ServerToClientEvents } from "../../src/contracts/socket";
+
+type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
+
+let mock: Awaited<ReturnType<typeof startMock>>;
+const clients: Client[] = [];
+
+function client(token: string): Client {
+  const c: Client = io(`http://localhost:${mock.port}`, { auth: { token }, reconnection: false, forceNew: true });
+  clients.push(c);
+  return c;
+}
+
+const connected = (c: Client) => new Promise<void>((resolve) => c.once("connect", () => resolve()));
+
+beforeAll(async () => {
+  mock = await startMock({ port: 0 });
+});
+
+afterAll(async () => {
+  clients.forEach((c) => c.close());
+  await mock.close();
+});
+
+describe("mock handshake and room:join", () => {
+  it("rejects a missing or non-dev token with UNAUTHENTICATED", async () => {
+    const c = client("not-a-token");
+    const err = await new Promise<Error & { data?: { code?: string } }>((resolve) => c.once("connect_error", resolve));
+    expect(err.data?.code).toBe("UNAUTHENTICATED");
+  });
+
+  it("returns self, members, locks and the fixture tree", async () => {
+    const c = client("dev:alice");
+    await connected(c);
+    const res = await c.emitWithAck("room:join", { wsId: "demo", branch: "main" });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.self).toEqual({ userId: "dev|alice", name: "alice", openPath: null });
+    expect(res.locks).toEqual([]);
+    expect(res.tree).toContain("src/auth.ts");
+    expect(res.tree).toContain("src/routes/users.ts");
+  });
+
+  it("announces joins to the room and lists both members", async () => {
+    const a = client("dev:carol");
+    const b = client("dev:dave");
+    await Promise.all([connected(a), connected(b)]);
+    await a.emitWithAck("room:join", { wsId: "w2", branch: "main" });
+    const joined = new Promise((resolve) => a.once("presence:changed", resolve));
+    const res = await b.emitWithAck("room:join", { wsId: "w2", branch: "main" });
+    expect(await joined).toMatchObject({ userId: "dev|dave", status: "joined" });
+    expect(res.ok && res.members.map((m) => m.userId).sort()).toEqual(["dev|carol", "dev|dave"]);
+  });
+
+  it("keeps branches in separate rooms", async () => {
+    const a = client("dev:erin");
+    const b = client("dev:frank");
+    await Promise.all([connected(a), connected(b)]);
+    await a.emitWithAck("room:join", { wsId: "w3", branch: "main" });
+    const res = await b.emitWithAck("room:join", { wsId: "w3", branch: "feat/x" });
+    expect(res.ok && res.members.map((m) => m.userId)).toEqual(["dev|frank"]);
+  });
+});

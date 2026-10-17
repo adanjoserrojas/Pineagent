@@ -1,0 +1,68 @@
+/* Tokens from the "Pineagent Workspace UI" design canvas (States artboard). */
+:root {
+  --ground: #0e1411;
+  --panel: #121a16;
+  --raised: #1a2a22;
+  --line: #26332c;
+  --text: #e6ede8;
+  --muted: #9aaba1;
+  --faint: #56685e;
+  --action: #5fd39a;
+  --on-action: #0b1a12;
+  --you: #6cb8ff;
+  --you-text: #8fc8ff;
+  --you-bg: #1e3550;
+  --other: #f2a65a;
+  --other-text: #f5b97a;
+  --other-bg: #4a3218;
+  --agent-text: #c9b8ff;
+  --agent-bg: #2e2550;
+  --danger: #ff9ca8;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--text); font: 14px/1.45 var(--sans); }
+button { font: inherit; }
+.mono { font-family: var(--mono); font-size: 13px; }
+
+.app { min-height: 100vh; display: flex; flex-direction: column; }
+.topbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 16px;
+  padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.brand { font-weight: 600; font-size: 15px; }
+.branch { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; }
+.spacer { flex: 1 1 auto; }
+.who { color: var(--muted); font-size: 13px; }
+
+.members { display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.avatar {
+  width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; background: var(--other-bg); color: var(--other); border: 2px solid var(--other);
+}
+.avatar-self { background: var(--you-bg); color: var(--you-text); border-color: var(--you); }
+
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+.pill-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.pill-connected { background: #15281f; color: #8ce6ba; }
+.pill-connecting, .pill-reconnecting { background: #2a1f10; color: #f7d2aa; }
+.pill-offline { background: #1e2422; color: #c7d3e2; }
+.pill-unauthenticated, .pill-forbidden { background: #2b1418; color: #ffc4cc; }
+
+.body { flex: 1 1 auto; display: flex; flex-wrap: wrap; min-height: 0; }
+.tree { flex: 1 1 240px; max-width: 300px; padding: 12px 8px; border-right: 1px solid var(--line); background: var(--panel); }
+.tree ul { margin: 0; padding: 0; list-style: none; }
+.tree li { padding: 4px 8px; }
+.section-label { margin: 0; padding: 0 8px 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); }
+.editor-empty { flex: 999 1 560px; min-width: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+
+.center-note { margin: 30vh auto; text-align: center; color: var(--muted); }
+.signin { max-width: 420px; margin: 20vh auto; padding: 0 16px; display: flex; flex-direction: column; gap: 16px; }
+.signin h1 { margin: 0; font-size: 28px; }
+.signin p { margin: 0; color: var(--muted); }
+.signin-error { color: var(--danger); }
+.btn-primary { height: 44px; border: 0; border-radius: 10px; background: var(--action); color: var(--on-action); font-weight: 600; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
