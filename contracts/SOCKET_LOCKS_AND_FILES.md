@@ -47,7 +47,7 @@ C→S events use a Socket.IO acknowledgement. S→room events are broadcasts. A 
 
 | Event | Direction | Payload | Ack / notes |
 | --- | --- | --- | --- |
-| `room:join` | C→S | `{ wsId, branch }` | `{ ok: true, self: Member, members: Member[], locks: Lock[], tree: string[], timing: { heartbeatMs, leaseMs } }` or `{ ok: false, code: "NOT_COLLABORATOR" }`. `Member = { userId, name, avatarUrl, openPath }`. PROPOSED: `self`, `tree`, `timing`, `avatarUrl`. |
+| `room:join` | C→S | `{ wsId, branch }` | `{ ok: true, self: Member, members: Member[], locks: Lock[], tree: string[], timing: { heartbeatMs, leaseMs } }` or `{ ok: false, code: "NOT_COLLABORATOR" \| "UNAVAILABLE" }`. `Member = { userId, name, avatarUrl, openPath }`. `wsId` is `"<owner>/<repo>"` for a GitHub repository (no `.`/`..` segments). `NOT_COLLABORATOR` = the user can't push to it (checked with their own GitHub token); `UNAVAILABLE` = not allowlisted, or the clone failed. PROPOSED: `self`, `tree`, `timing`, `avatarUrl`, `UNAVAILABLE`, the `wsId` shape. |
 | `presence:update` | C→S | `{ openPath: string \| null }` | No ack. |
 | `presence:changed` | S→room | `{ userId, name, avatarUrl?, status: "joined" \| "left" \| "updated", openPath? }` | PROPOSED: `updated` (a member opened another file) and `avatarUrl`. |
 
@@ -64,12 +64,14 @@ C→S events use a Socket.IO acknowledgement. S→room events are broadcasts. A 
 
 | Event | Direction | Payload | Ack / notes |
 | --- | --- | --- | --- |
-| `file:snapshot` | C→S | `{ path }` | `{ path, version, content, hash }` or `{ ok: false, code: "NOT_FOUND" }`. Used on open, on a version gap, and after reconnect. |
+| `file:snapshot` | C→S | `{ path }` | `{ ok: true, path, version, content, hash }`, `{ ok: false, code: "NOT_FOUND" }`, or `{ ok: false, code: "UNSUPPORTED", reason: "binary" \| "too_large" }` (PROPOSED: over 1 MB or contains NUL). Used on open, on a version gap, and after reconnect. Symlinks that resolve outside the worktree are `NOT_FOUND`. |
 | `file:ops` | C→S, at most every 100 ms | `{ path, baseVersion, ops: Op[] }` | `{ ok: true, version }` or `{ ok: false, code: "NOT_HOLDER" \| "STALE", currentVersion }` |
 | `file:changed` | S→room except sender | `{ path, version, ops, author, source: "editor" \| "agent" \| "shell" }` | `shell` = formatter or codegen output detected by the worktree watcher. |
 | `tree:changed` | S→room | `{ path, change: "add" \| "delete" \| "rename", newPath? }` | |
 
 ## Server rules
+
+0. Limits (server-enforced): ≤ 1000 ops and ≤ 1 MB of inserted text per `file:ops` batch, files ≤ 1 MB, ≤ 2 MB per Socket.IO message, about 50 events/s per socket (burst 200) before the socket is disconnected.
 
 1. `file:ops` is accepted only when the sender holds a `user` lock covering `path` and `baseVersion === version`. On accept: apply, write to disk, `version++`, set the lock's `lastEditAt`, ack, then broadcast.
 2. A socket `disconnect` does **not** release locks. Wi-Fi drops are common; leases expire through the 30 s heartbeat timeout instead.

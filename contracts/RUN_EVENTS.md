@@ -42,7 +42,7 @@ type RunView = {
 
 | Event | Direction | Payload | Ack |
 | --- | --- | --- | --- |
-| `run:start` | C→S | `{ task }` | `{ ok: true, runId }` or `{ ok: false, code: "BAD_REQUEST" }` |
+| `run:start` | C→S | `{ task }` | `{ ok: true, runId }` or `{ ok: false, code: "BAD_REQUEST" \| "NOT_AVAILABLE" }` (PROPOSED: no harness on this server) |
 | `run:list` | C→S | `{}` | `{ ok: true, runs: RunView[] }`. Used on every (re)join. |
 | `run:approve` | C→S | `{ runId, candidateId }` or `{ runId, none: true, hint }` | `{ ok: true }` or `{ ok: false, code: "NOT_OWNER" \| "NOT_WAITING" }`. Never by voice (LLD 11). |
 | `run:pause` / `run:resume` | C→S | `{ runId }` | same codes. Pause takes effect at the next step boundary. |
@@ -58,6 +58,10 @@ type RunView = {
 ## Firmware face names
 
 `STATE <name>` accepts the keys in `firmware/PlantBotTestKit/animations/viewport/states.json`. Run states map to `planning`, `routing` (`routing_cache` / `routing_llm` by router mode), `executing`, `awaiting_approval`, `blocked`, `paused`, `error`, `done`, `idle`; connection loss maps to `reconnecting` / `disconnected`. The Web Serial bridge is the Hardware Engineer's.
+
+## Where the harness runs
+
+Inside the Node server process (SE1's decision), one instance per branch room, through the `Harness` interface in `packages/core/src/server/harness.ts`: `start`, `list`, `approve`, `pause`, `resume`, `close`, created by a `HarnessFactory` that receives the room's `Workspace` (locks and edits go through the same checks as people's), its file list, and event callbacks the gateway broadcasts. `services/api` passes it as the `harness` option of `createApp`; until then `run:list` answers `[]` and `run:start` answers `NOT_AVAILABLE`. The dev mock's scripted `MockHarness` (`apps/web/mock/harness.ts`) implements the same interface.
 
 ## Open items for Software Engineer 1
 
