@@ -216,7 +216,9 @@ export function FileTree({ paths, locks, members, selfId, openPath, loading, onO
           {items.map((item) => {
             const lock = lockOn(item.path, locks);
             const inherited = !lock && item.kind === "file" ? coveringDirLock(item.path, locks) : undefined;
-            const viewers = item.kind === "file" ? viewersOf(item.path) : [];
+            // The lock badge already shows its holder's face, so don't repeat them as a viewer.
+            const badgeFace = lock && lock.holderType === "user" ? lock.holder : null;
+            const viewers = item.kind === "file" ? viewersOf(item.path).filter((v) => v.userId !== badgeFace) : [];
             const tile = fileTile(item.name);
             const isDirOpen = item.kind === "dir" && inTree && !collapsed.has(item.path);
             return (

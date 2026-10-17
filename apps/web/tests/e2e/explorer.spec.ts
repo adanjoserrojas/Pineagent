@@ -58,5 +58,12 @@ test("another person's open file shows their avatar on the row", async ({ page, 
   await row(page, "src/db.ts").click();
   await expect(row(bob, "src/auth.ts").getByRole("img", { name: "alice has this open" })).toHaveCount(0);
   await expect(row(bob, "src/db.ts").getByRole("img", { name: "alice has this open" })).toBeVisible();
+
+  // Once alice also holds the lock, her face appears once (on the lock badge), not twice.
+  await page.locator(".monaco-editor .view-line").first().click({ position: { x: 2, y: 5 } });
+  await page.keyboard.type("x");
+  const badge = row(bob, "src/db.ts").getByTestId("lock-badge");
+  await expect(badge).toContainText("alice");
+  await expect(row(bob, "src/db.ts").getByRole("img", { name: /alice/ })).toHaveCount(1);
   await bob.context().close();
 });
