@@ -2,11 +2,11 @@
 // Implements docs/contracts/SOCKET_LOCKS_AND_FILES.md in memory. NOT the real server:
 // it accepts `dev:<name>` tokens, which the real API must reject.
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, readdir } from "node:fs/promises";
+import { cp, mkdtemp, readdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { Server, type Socket } from "socket.io";
@@ -18,6 +18,7 @@ import {
   type Member,
   type ServerToClientEvents,
 } from "../src/contracts/socket";
+import { Workspace } from "./workspace";
 
 type User = { id: string; name: string; avatarUrl: string | null };
 type SocketData = { user: User; room?: string; openPath: string | null };
@@ -74,21 +75,37 @@ async function verifyAuth0(token: string): Promise<User | null> {
 
 const presenceOf = (user: User) => ({ userId: user.id, name: user.name, avatarUrl: user.avatarUrl });
 
-// Resolves a repo-relative path inside the workspace copy; null for anything that escapes it.
-function inWorkspace(root: string, path: unknown): string | null {
-  if (typeof path !== "string" || path === "" || path.startsWith("/") || path.includes("\0")) return null;
-  const full = resolve(root, path);
-  return full.startsWith(root + sep) ? full : null;
-}
+export type MockOptions = {
+  port?: number;
+  snapshotDelayMs?: number; // simulates a slow server for the browser's loading states
+  heartbeatMs?: number; // contract: 10 s
+  leaseMs?: number; // contract: 30 s without a heartbeat
+  idleMs?: number; // contract: 10 min without edits
+  sweepMs?: number;
+};
 
-// snapshotDelayMs simulates a slow server for tests of the browser's loading states.
-export async function startMock({ port = 3001, snapshotDelayMs = 0 }: { port?: number; snapshotDelayMs?: number } = {}) {
-  // Each mock instance edits its own temp copy of the fixture, so tests never touch the source tree.
-  const root = await mkdtemp(join(tmpdir(), "pineagent-mock-"));
-  await cp(FIXTURE, root, { recursive: true });
-
-  // File versions; edits (M4) will bump these. Every file starts at version 1.
-  const versions = new Map<string, number>();
+export async function startMock({
+  port = 3001,
+  snapshotDelayMs = 0,
+  heartbeatMs = 10_000,
+  leaseMs = 30_000,
+  idleMs = 600_000,
+  sweepMs = 1_000,
+}: MockOptions = {}) {
+  // One Workspace per branch room, each editing its own temp copy of the fixture, so tests never
+  // touch the source tree and branches never share files or locks.
+  const rooms = new Map<string, Promise<Workspace>>();
+  const workspaceFor = (room: string) => {
+    let ws = rooms.get(room);
+    if (!ws) {
+      ws = mkdtemp(join(tmpdir(), "pineagent-mock-")).then(async (root) => {
+        await cp(FIXTURE, root, { recursive: true });
+        return new Workspace(root, { leaseMs, idleMs });
+      });
+      rooms.set(room, ws);
+    }
+    return ws;
+  };
 
   const http = createServer();
   const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(http, {
@@ -116,30 +133,83 @@ export async function startMock({ port = 3001, snapshotDelayMs = 0 }: { port?: n
     return [...byUser.values()];
   }
 
+  // Leases end here, never on disconnect: Wi-Fi blips are common, so only silence or idleness frees a lock.
+  const sweeper = setInterval(async () => {
+    for (const [room, pending] of rooms) {
+      for (const { lock, reason } of (await pending).sweep()) {
+        io.to(room).emit("lock:changed", { path: lock.path, kind: lock.kind, lock: null, reason });
+      }
+    }
+  }, sweepMs);
+
   io.on("connection", (socket: MockSocket) => {
     const { user } = socket.data;
+    const joined = async () => (socket.data.room ? { room: socket.data.room, ws: await workspaceFor(socket.data.room) } : null);
 
     socket.on("room:join", async ({ wsId, branch }, ack) => {
       if (typeof wsId !== "string" || typeof branch !== "string") return ack({ ok: false, code: "NOT_COLLABORATOR" });
       const room = roomName(wsId, branch);
       if (socket.data.room && socket.data.room !== room) socket.leave(socket.data.room);
       socket.data.room = room;
+      const ws = await workspaceFor(room);
       await socket.join(room);
       const self: Member = { userId: user.id, name: user.name, avatarUrl: user.avatarUrl, openPath: socket.data.openPath };
-      ack({ ok: true, self, members: await membersOf(room), locks: [], tree: await listFiles(root) });
+      ack({
+        ok: true,
+        self,
+        members: await membersOf(room),
+        locks: ws.allLocks(),
+        tree: await listFiles(ws.root),
+        timing: { heartbeatMs, leaseMs },
+      });
       socket.to(room).emit("presence:changed", { ...presenceOf(user), status: "joined", openPath: self.openPath });
     });
 
     socket.on("file:snapshot", async ({ path }, ack) => {
-      const full = socket.data.room ? inWorkspace(root, path) : null;
-      if (!full) return ack({ ok: false, code: "NOT_FOUND" });
-      try {
-        if (snapshotDelayMs) await new Promise((r) => setTimeout(r, snapshotDelayMs));
-        const content = await readFile(full, "utf8");
-        const hash = createHash("sha256").update(content).digest("hex");
-        ack({ ok: true, path, version: versions.get(path) ?? 1, content, hash });
-      } catch {
-        ack({ ok: false, code: "NOT_FOUND" });
+      const j = await joined();
+      const file = j && j.ws.resolvePath(path) ? await j.ws.read(path) : null;
+      if (!file) return ack({ ok: false, code: "NOT_FOUND" });
+      if (snapshotDelayMs) await new Promise((r) => setTimeout(r, snapshotDelayMs));
+      const hash = createHash("sha256").update(file.content).digest("hex");
+      ack({ ok: true, path, version: file.version, content: file.content, hash });
+    });
+
+    socket.on("lock:acquire", async ({ path, kind }, ack) => {
+      const j = await joined();
+      const target = kind === "dir" && typeof path === "string" && path.endsWith("/") ? path.slice(0, -1) : path;
+      // Malformed requests get no ack; the client's timeout handles it.
+      if (!j || (kind !== "file" && kind !== "dir") || !j.ws.resolvePath(target)) return;
+      const res = j.ws.acquire(path, kind, user.id);
+      if (res.ok) {
+        ack({ ok: true, lock: res.lock });
+        if (res.created) io.to(j.room).emit("lock:changed", { path, kind, lock: res.lock, reason: "acquired" });
+      } else {
+        ack(res);
+      }
+    });
+
+    socket.on("lock:release", async ({ path }, ack) => {
+      const j = await joined();
+      const released = j?.ws.release(path, user.id);
+      ack({ ok: true });
+      if (j && released) io.to(j.room).emit("lock:changed", { path, kind: released.kind, lock: null, reason: "released" });
+    });
+
+    socket.on("session:heartbeat", async (_msg, ack) => {
+      const j = await joined();
+      ack({ ok: true, expired: j ? j.ws.heartbeat(user.id) : [] });
+    });
+
+    socket.on("file:ops", async ({ path, baseVersion, ops }, ack) => {
+      const j = await joined();
+      if (!j || !j.ws.resolvePath(path) || !Number.isInteger(baseVersion)) {
+        return ack({ ok: false, code: "STALE", currentVersion: 0 });
+      }
+      const res = await j.ws.applyOps(path, user.id, baseVersion, ops);
+      ack(res);
+      if (res.ok) {
+        // Everyone else in the branch, including this user's other tabs (D3: branch-wide).
+        socket.to(j.room).emit("file:changed", { path, version: res.version, ops, author: user.id, source: "editor" });
       }
     });
 
@@ -161,11 +231,15 @@ export async function startMock({ port = 3001, snapshotDelayMs = 0 }: { port?: n
 
   await new Promise<void>((resolve) => http.listen(port, resolve));
   const bound = (http.address() as AddressInfo).port;
-  console.log(`[mock] listening on :${bound}, workspace copy at ${root}`);
+  console.log(`[mock] listening on :${bound}`);
   return {
     port: bound,
-    root,
-    close: () => new Promise<void>((resolve) => io.close(() => resolve())),
+    // Exposed for tests that check what reached disk.
+    workspace: workspaceFor,
+    close: () => {
+      clearInterval(sweeper);
+      return new Promise<void>((resolve) => io.close(() => resolve()));
+    },
   };
 }
 
@@ -176,6 +250,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } catch {
     // No .env.local: dev tokens only.
   }
+  const env = (k: string) => (process.env[k] ? Number(process.env[k]) : undefined);
   console.log(`[mock] Auth0 verification ${process.env.VITE_AUTH0_DOMAIN ? "on" : "off"}`);
-  startMock({ port: Number(process.env.MOCK_PORT ?? 3001) });
+  startMock({
+    port: env("MOCK_PORT") ?? 3001,
+    heartbeatMs: env("HEARTBEAT_MS"),
+    leaseMs: env("LEASE_MS"),
+    idleMs: env("IDLE_MS"),
+    sweepMs: env("SWEEP_MS"),
+  });
 }

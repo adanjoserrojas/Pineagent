@@ -92,6 +92,37 @@ describe("mock handshake and room:join", () => {
     }
   });
 
+  it("locks and edits travel over the socket: acquire, broadcast, ops, file:changed", async () => {
+    const a = client("dev:jo");
+    const b = client("dev:kai");
+    await Promise.all([connected(a), connected(b)]);
+    await a.emitWithAck("room:join", { wsId: "w6", branch: "main" });
+    const joinB = await b.emitWithAck("room:join", { wsId: "w6", branch: "main" });
+    expect(joinB.ok && joinB.timing).toEqual({ heartbeatMs: 10_000, leaseMs: 30_000 });
+
+    const lockSeen = new Promise((r) => b.once("lock:changed", r));
+    expect(await a.emitWithAck("lock:acquire", { path: "src/auth.ts", kind: "file" })).toMatchObject({ ok: true });
+    expect(await lockSeen).toMatchObject({ path: "src/auth.ts", reason: "acquired", lock: { holder: "dev|jo" } });
+    expect(await b.emitWithAck("lock:acquire", { path: "src/auth.ts", kind: "file" })).toMatchObject({ ok: false, code: "HELD" });
+
+    // L3 over the wire: the non-holder is refused.
+    expect(await b.emitWithAck("file:ops", { path: "src/auth.ts", baseVersion: 1, ops: [{ offset: 0, length: 0, text: "x" }] }))
+      .toEqual({ ok: false, code: "NOT_HOLDER", currentVersion: 1 });
+
+    const changed = new Promise((r) => b.once("file:changed", r));
+    const ops = [{ offset: 0, length: 0, text: "// edited\n" }];
+    expect(await a.emitWithAck("file:ops", { path: "src/auth.ts", baseVersion: 1, ops })).toEqual({ ok: true, version: 2 });
+    expect(await changed).toEqual({ path: "src/auth.ts", version: 2, ops, author: "dev|jo", source: "editor" });
+
+    const snap = await b.emitWithAck("file:snapshot", { path: "src/auth.ts" });
+    expect(snap.ok && snap.version).toBe(2);
+    expect(snap.ok && snap.content.startsWith("// edited\n")).toBe(true);
+
+    const released = new Promise((r) => b.once("lock:changed", r));
+    await a.emitWithAck("lock:release", { path: "src/auth.ts" });
+    expect(await released).toMatchObject({ path: "src/auth.ts", lock: null, reason: "released" });
+  });
+
   it("keeps branches in separate rooms", async () => {
     const a = client("dev:erin");
     const b = client("dev:frank");

@@ -21,8 +21,12 @@ export const UNAUTHENTICATED = "UNAUTHENTICATED";
 // PROPOSED: avatarUrl. The server derives it from the Auth0 sub `github|<id>`; null when unknown.
 export type Member = { userId: string; name: string; avatarUrl: string | null; openPath: string | null };
 
+// PROPOSED: the server owns lease timing, so clients heartbeat at the rate it asks for
+// (tests shorten both; production is 10 s / 30 s).
+export type LeaseTiming = { heartbeatMs: number; leaseMs: number };
+
 export type RoomJoinAck =
-  | { ok: true; self: Member; members: Member[]; locks: Lock[]; tree: string[] } // PROPOSED: self, tree
+  | { ok: true; self: Member; members: Member[]; locks: Lock[]; tree: string[]; timing: LeaseTiming } // PROPOSED: self, tree, timing
   | { ok: false; code: "NOT_COLLABORATOR" };
 
 export type LockAcquireAck = { ok: true; lock: Lock } | { ok: false; code: "HELD"; lock: Lock };
