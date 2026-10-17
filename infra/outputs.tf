@@ -21,3 +21,8 @@ output "public_ip" {
 output "url" {
   value = local.https ? "https://${var.domain_name}" : null
 }
+
+output "release_bucket" {
+  description = "Where infra/deploy.sh uploads builds."
+  value       = aws_s3_bucket.releases.bucket
+}

@@ -46,6 +46,8 @@ resource "aws_instance" "app" {
     data_volume_id = aws_ebs_volume.workspaces.id
     domain_name    = var.domain_name
     caddy_version  = "2.11.7"
+    release_bucket = aws_s3_bucket.releases.bucket
+    region         = var.region
   })
   user_data_replace_on_change = true
 

@@ -6,7 +6,7 @@ set -euo pipefail
 exec > >(tee -a /var/log/pineagent-bootstrap.log) 2>&1
 echo "bootstrap start $(date -Is)"
 
-dnf install -y git docker xz tar
+dnf install -y git docker xz tar openssl
 
 # --- Node.js 22 LTS from nodejs.org, checked against the published SHA-256 ---------------------
 NODE_BASE=https://nodejs.org/dist/latest-v22.x
@@ -68,11 +68,99 @@ WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
 systemctl enable --now pineagent-placeholder
+
+# --- The workspace server (services/api), installed from releases ---------------------------
+# Releases unpack to /opt/pineagent/releases/<sha>; /opt/pineagent/current points at the live one.
+install -d -o pineagent -g pineagent -m 755 /workspaces/repos
+install -d -o pineagent -g pineagent -m 700 /workspaces/.pineagent
+mkdir -p /opt/pineagent/releases /opt/pineagent/bin
+
+# The server's identity at Auth0 (private_key_jwt). Generated here, on the data volume, so it
+# survives rebuilds and never exists anywhere else; only the public half is registered in Auth0.
+KEY=/workspaces/.pineagent/auth0-m2m.key
+if [ ! -f "$KEY" ]; then
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$KEY"
+fi
+chown pineagent:pineagent "$KEY"
+chmod 600 "$KEY"
+openssl pkey -in "$KEY" -pubout -out /workspaces/.pineagent/auth0-m2m.pub.pem
+chmod 644 /workspaces/.pineagent/auth0-m2m.pub.pem
+
+cat > /etc/systemd/system/pineagent-api.service <<'UNIT'
+[Unit]
+Description=Pineagent workspace server
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/pineagent/current/api/server.mjs
+
+[Service]
+User=pineagent
+Group=pineagent
+EnvironmentFile=/opt/pineagent/current/api.env
+Environment=HOME=/workspaces/.pineagent
+ExecStart=/usr/local/bin/node --enable-source-maps /opt/pineagent/current/api/server.mjs
+Restart=always
+RestartSec=2
+# The server can write only the workspaces; the rest of the system is read-only to it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/workspaces
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# Installs one release and switches to it; if it doesn't answer /health with its own sha within
+# 30 s, switches back to the previous release. Used by deploys (over SSM) and on first boot.
+cat > /opt/pineagent/bin/install-release <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+SHA="$1"
+WANT_SUM="$${2:-}"
+DIR="/opt/pineagent/releases/$SHA"
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+aws s3 cp --region "${region}" --only-show-errors "s3://${release_bucket}/releases/$SHA.tgz" "$TMP/release.tgz"
+if [ -n "$WANT_SUM" ]; then echo "$WANT_SUM  $TMP/release.tgz" | sha256sum -c -; fi
+rm -rf "$DIR.tmp" && mkdir -p "$DIR.tmp"
+tar -xzf "$TMP/release.tgz" -C "$DIR.tmp"
+chmod -R a+rX "$DIR.tmp"
+rm -rf "$DIR" && mv "$DIR.tmp" "$DIR"
+PREV=$(readlink -f /opt/pineagent/current || true)
+switch() { ln -sfn "$1" /opt/pineagent/current.new && mv -Tf /opt/pineagent/current.new /opt/pineagent/current; }
+switch "$DIR"
+systemctl disable --now pineagent-placeholder 2>/dev/null || true
+systemctl enable pineagent-api >/dev/null 2>&1
+systemctl restart pineagent-api
+for _ in $(seq 1 30); do
+  if curl -fsS localhost:3001/health 2>/dev/null | grep -q "\"sha\":\"$SHA\""; then echo "installed $SHA"; exit 0; fi
+  sleep 1
+done
+echo "release $SHA failed its health check:" >&2
+journalctl -u pineagent-api -n 20 --no-pager -o cat >&2 || true
+if [ -n "$PREV" ] && [ "$PREV" != "$DIR" ]; then
+  switch "$PREV"
+  systemctl restart pineagent-api
+  echo "rolled back to $(basename "$PREV")" >&2
+else
+  systemctl stop pineagent-api
+  systemctl enable --now pineagent-placeholder
+fi
+exit 1
+SCRIPT
+chmod 755 /opt/pineagent/bin/install-release
+systemctl daemon-reload
+
+# A rebuilt instance comes back on the last deployed release by itself.
+LATEST=$(aws s3 cp --region "${region}" --only-show-errors "s3://${release_bucket}/latest.txt" - 2>/dev/null || true)
+if [ -n "$LATEST" ]; then /opt/pineagent/bin/install-release "$LATEST" || echo "could not install $LATEST"; fi
 %{ if domain_name != "" ~}
 
 # --- Caddy: HTTPS for ${domain_name} ---------------------------------------------------------
 # Terminates TLS with a Let's Encrypt certificate it obtains and renews itself, redirects http to
-# https, and proxies everything (WebSockets included) to the Node server on localhost.
+# https, serves the web app, and proxies Socket.IO (WebSockets included) to Node on localhost.
 CADDY_TAR=caddy_${caddy_version}_linux_amd64.tar.gz
 CADDY_BASE=https://github.com/caddyserver/caddy/releases/download/v${caddy_version}
 cd /tmp
@@ -87,10 +175,31 @@ id caddy >/dev/null 2>&1 || useradd --system --home-dir /var/lib/caddy --create-
 # Let's Encrypt again (it allows only 5 identical certificates a week).
 install -d -o caddy -g caddy -m 700 /workspaces/.caddy
 mkdir -p /etc/caddy
+# The web app and the server on one origin: no CORS, one certificate.
 cat > /etc/caddy/Caddyfile <<'CADDY'
 ${domain_name} {
 	encode
-	reverse_proxy 127.0.0.1:3001
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+	}
+	@backend path /socket.io/* /health
+	handle @backend {
+		reverse_proxy 127.0.0.1:3001
+	}
+	handle {
+		root * /opt/pineagent/current/web
+		# Built assets have hashed names and never change; everything else (index.html, served for
+		# every app route) must be re-checked so a deploy shows up on the next reload.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@pages not path /assets/*
+		header @pages Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
 }
 CADDY
 

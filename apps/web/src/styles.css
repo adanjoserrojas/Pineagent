@@ -299,3 +299,10 @@ button { font: inherit; }
 .signin-error { color: var(--danger); }
 .btn-primary { height: 44px; border: 0; border-radius: 10px; background: var(--action); color: var(--on-action); font-weight: 600; cursor: pointer; }
 :focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
+.repo-picker { display: flex; flex-direction: column; gap: 12px; }
+.repo-picker label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.repo-picker input {
+  height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  color: var(--text); font: 14px var(--mono);
+}
+.repo-picker input:focus { outline: none; border-color: #2f4a66; }
