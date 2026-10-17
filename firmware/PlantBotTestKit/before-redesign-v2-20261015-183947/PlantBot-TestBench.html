@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plant Bot Test Bench</title>
+<style>
+:root{
+  --bg:#f4f6f2; --panel:#ffffff; --ink:#1d2a20; --muted:#5f6f63; --line:#d9e1d6;
+  --accent:#2f7d4a; --accent-ink:#ffffff; --pass:#1f8a4c; --pass-bg:#e3f4e8; --fail:#c0392b; --fail-bg:#fbe6e3;
+  --warn:#9a6700; --warn-bg:#fff4d6; --code:#eef2ec; --log:#0f1712; --log-ink:#cfe3d4;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#101612; --panel:#18211b; --ink:#e4ede6; --muted:#9db0a2; --line:#2b3a30;
+    --accent:#4fb174; --accent-ink:#08130c; --pass:#5fd08c; --pass-bg:#173523; --fail:#ff8a7a; --fail-bg:#3a1c18;
+    --warn:#f2c14e; --warn-bg:#3a3017; --code:#223027; --log:#0a0f0c; --log-ink:#bfe0c8; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+h1{font-size:18px;margin:0 8px 0 0}
+h2{font-size:16px;margin:0}
+button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 11px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed}
+.pill{padding:3px 10px;border-radius:999px;font-size:13px;font-weight:600;background:var(--code);color:var(--muted)}
+.pill.on{background:var(--pass-bg);color:var(--pass)}
+.pill.bad{background:var(--fail-bg);color:var(--fail)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0}
+.seg button.sel{background:var(--accent);color:var(--accent-ink)}
+label.inline{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)}
+.spacer{flex:1}
+main{max-width:1280px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px}
+@media (max-width:980px){main{grid-template-columns:1fr}}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-content:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.card .top{display:flex;align-items:center;gap:8px}
+.card .top .score{margin-left:auto;font-size:12px;color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sub{font-size:13px;color:var(--muted)}
+.big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+input[type=number],input[type=text]{font:inherit;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 8px;width:86px}
+.swatch{width:26px;height:26px;border-radius:6px;padding:0;border:1px solid var(--line)}
+.tests{border-top:1px dashed var(--line);padding-top:8px;display:flex;flex-direction:column;gap:6px}
+.test{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center;padding:6px 8px;border-radius:8px;background:var(--bg)}
+.test.pass{background:var(--pass-bg)} .test.fail{background:var(--fail-bg)}
+.test .name{font-weight:600;font-size:14px}
+.test .look{grid-column:1;font-size:12.5px;color:var(--muted)}
+.test .btns{grid-row:1 / span 2;grid-column:2;display:flex;gap:4px}
+.test .btns button{padding:3px 8px;font-size:13px}
+.test.pass .bp{background:var(--pass);color:#fff;border-color:var(--pass)}
+.test.fail .bf{background:var(--fail);color:#fff;border-color:var(--fail)}
+.test .why{grid-column:1 / span 2;font-size:12px;color:var(--fail)}
+details{font-size:13px} details summary{cursor:pointer;color:var(--muted)}
+details ul{margin:6px 0 0 18px;padding:0} details li{margin:3px 0}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:12.5px}
+aside{display:flex;flex-direction:column;gap:14px;position:sticky;top:70px;align-self:start;max-height:calc(100vh - 86px)}
+@media (max-width:980px){aside{position:static;max-height:none}}
+.log{background:var(--log);color:var(--log-ink);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;border-radius:10px;padding:10px;height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.log .tx{color:#8fc7ff} .log .err{color:#ff9b8f} .log .evt{color:#f2c14e} .log .sys{color:#7f9a87}
+.banner{display:none;padding:10px 14px;border-radius:10px;background:var(--warn-bg);color:var(--warn);font-size:14px}
+.banner.show{display:block}
+.progress{height:8px;border-radius:99px;background:var(--code);overflow:hidden}
+.progress > i{display:block;height:100%;background:var(--pass);width:0;transition:width .25s}
+.help ol{margin:6px 0 0 18px;padding:0} .help li{margin:4px 0}
+.full{grid-column:1 / -1}
+</style>
+</head>
+<body>
+<header>
+  <h1>🌱 Plant Bot Test Bench</h1>
+  <button id="btnConnect" class="primary">Connect</button>
+  <span id="status" class="pill">Not connected</span>
+  <label class="inline" title="Only list Espressif native-USB ports (VID 0x303A). Untick if your board doesn't show up."><input type="checkbox" id="onlyEsp" checked> native USB only</label>
+  <label class="inline" title="Reopen the port automatically if the board resets and comes back."><input type="checkbox" id="autoRe" checked> auto-reconnect</label>
+  <span class="spacer"></span>
+  <span class="sub">Testing</span>
+  <div class="seg" id="robotSeg"><button data-r="A" class="sel">Robot A</button><button data-r="B">Robot B</button></div>
+</header>
+
+<main>
+  <section class="cards" id="cards">
+    <div class="banner full" id="unsupported">This browser has no Web Serial. Open this file in <b>Chrome</b> or <b>Edge</b> on a laptop (not Safari/Firefox, not a phone).</div>
+    <div class="banner full" id="brownout"></div>
+
+    <!-- BOARD -->
+    <div class="card" data-group="board">
+      <div class="top"><h2>1 · Board, PSRAM, LED</h2><span class="score"></span></div>
+      <div class="sub" id="infoLine">Connect, then run the checks. Needs only the USB cable.</div>
+      <div class="row">
+        <button data-needs="conn" id="btnBoard">Run board checks</button>
+        <button data-needs="conn" data-cmd="INFO">INFO</button>
+      </div>
+      <div class="row">
+        <span class="sub">LED</span>
+        <button class="swatch" style="background:#e53935" data-needs="conn" data-cmd="LED 40 0 0" title="red"></button>
+        <button class="swatch" style="background:#43a047" data-needs="conn" data-cmd="LED 0 40 0" title="green"></button>
+        <button class="swatch" style="background:#1e88e5" data-needs="conn" data-cmd="LED 0 0 40" title="blue"></button>
+        <button class="swatch" style="background:#111" data-needs="conn" data-cmd="LED 0 0 0" title="off"></button>
+        <span class="sub">pin</span>
+        <div class="seg" id="ledPinSeg"><button data-p="48" class="sel" data-needs="conn">48</button><button data-p="38" data-needs="conn">38</button></div>
+      </div>
+      <div class="tests"></div>
+      <details><summary>If something fails</summary><ul>
+        <li><b>No reply to PING:</b> you're on the wrong USB port or the firmware isn't flashed. Use the port marked <b>USB</b> (native, shows as "USB JTAG/serial debug unit" or "USB Serial Device"). The <b>COM/UART</b> port only carries boot logs.</li>
+        <li><b>PSRAM 0 MB:</b> in Arduino IDE set <i>PSRAM → OPI PSRAM</i> and re-flash. If it still says 0, that board is bad; swap in a spare from the 5-pack.</li>
+        <li><b>Flash reads 16 MB:</b> it's an N16R8. Fine for us; set <i>Flash Size → 16MB</i> next time you flash.</li>
+        <li><b>LED stays dark:</b> click pin <b>38</b> and try a colour again. Some clones wire the RGB LED there.</li>
+      </ul></details>
+    </div>
+
+    <!-- POWER -->
+    <div class="card" data-group="power">
+      <div class="top"><h2>2 · 5 V brick sense</h2><span class="score"></span></div>
+      <div class="row" style="align-items:baseline;gap:14px">
+        <span class="big" id="senseV">–</span>
+        <span class="sub" id="senseMv">pin – mV</span>
+        <span id="sensePill" class="pill">unknown</span>
+      </div>
+      <div class="row">
+        <label class="inline"><input type="checkbox" id="poll" data-needs="conn"> live reading</label>
+        <button data-needs="conn" data-cmd="SENSE">Read once</button>
+        <label class="inline" title="When on, servo and amp tests are refused unless the brick is detected. Protects the USB port from servo current."><input type="checkbox" id="gate" checked data-needs="conn"> safety gate</label>
+      </div>
+      <div class="sub">The ADC tops out near 3.1 V, so a healthy 5 V rail shows as about <b>≥ 4.6 V</b>. That's expected: this pin only answers "is the brick on?"</div>
+      <div class="tests"></div>
+      <details><summary>If something fails</summary><ul>
+        <li><b>Reads 0 with the brick on:</b> check the brick's switch/plug, the 10k from +5V to GPIO7, and the 20k from GPIO7 to GND.</li>
+        <li><b>Reads high with the brick off:</b> the 20k to GND is missing, so the pin is floating. Or the brick's +5V is touching the board's 5V pin (it must not).</li>
+        <li><b>Never</b> wire the brick straight to GPIO7 without the divider: 5 V on a GPIO kills it.</li>
+      </ul></details>
+    </div>
+
+    <!-- DISPLAY -->
+    <div class="card" data-group="display">
+      <div class="top"><h2>3 · Face display</h2><span class="score"></span></div>
+      <div class="sub"><b>Continuous animated faces</b> · 20 fps. Idle starts automatically after flashing. Each expression loops until you select another.</div>
+      <div class="row">
+        <button data-needs="conn" data-cmd="LCD DEMO">Cycle all 18 faces</button>
+        <button data-needs="conn" data-cmd="LCD ANIM STATUS">Animation status / FPS</button>
+        <button data-needs="conn" data-cmd="LCD ANIM OFF">Stop animation</button>
+      </div><div class="row">
+        <button data-needs="conn" data-cmd="LCD ANIM IDLE">Idle</button>
+        <button data-needs="conn" data-cmd="LCD ANIM PLANNING">Planning</button>
+        <button data-needs="conn" data-cmd="LCD ANIM ROUTING">Routing</button>
+        <button data-needs="conn" data-cmd="LCD ANIM EXECUTING">Executing</button>
+        <button data-needs="conn" data-cmd="LCD ANIM AWAITING_APPROVAL">Awaiting approval</button>
+        <button data-needs="conn" data-cmd="LCD ANIM BLOCKED">Blocked</button>
+        <button data-needs="conn" data-cmd="LCD ANIM ERROR">Error</button>
+        <button data-needs="conn" data-cmd="LCD ANIM DONE">Done</button>
+        <button data-needs="conn" data-cmd="LCD ANIM DISCONNECTED">Disconnected</button>
+        <button data-needs="conn" data-cmd="LCD ANIM NO_MOTOR_POWER">No motor power</button>
+        <button data-needs="conn" data-cmd="LCD ANIM TEAM_JOIN">Teammate joined</button>
+        <button data-needs="conn" data-cmd="LCD ANIM TEAM_LEAVE">Teammate left</button>
+        <button data-needs="conn" data-cmd="LCD ANIM ROUTING_CACHE">Routing / cache</button>
+        <button data-needs="conn" data-cmd="LCD ANIM ROUTING_LLM">Routing / fallback</button>
+        <button data-needs="conn" data-cmd="LCD ANIM SPEAKING">Speaking</button>
+        <button data-needs="conn" data-cmd="LCD ANIM PAUSED">Paused</button>
+        <button data-needs="conn" data-cmd="LCD ANIM PARKED">Parked</button>
+        <button data-needs="conn" data-cmd="LCD ANIM RECONNECTING">Restoring state</button>
+      </div><div class="row">
+        <span class="sub">No motor power badge</span>
+        <button data-needs="conn" data-cmd="LCD POWER AUTO">Automatic</button>
+        <button data-needs="conn" data-cmd="LCD POWER ON">Show</button>
+        <button data-needs="conn" data-cmd="LCD POWER OFF">Hide for display test</button>
+      </div>
+      <div class="sub">Static pattern, fill, inversion and rotation tests stop the animation. Select a face to resume. A USB-only device shows an amber power badge; the face keeps moving.</div>
+
+      <div class="row">
+        <button data-needs="conn" data-cmd="LCD TEST">Test pattern</button>
+        <button data-needs="conn" data-cmd="LCD FACE">Happy face</button>
+        <button data-needs="conn" data-cmd="LCD FACE SAD">Sad face</button>
+        <button data-needs="conn" data-cmd="LCD SPEED">Speed test</button>
+      </div>
+      <div class="row">
+        <span class="sub">Fill</span>
+        <button class="swatch" style="background:#ff0000" data-needs="conn" data-cmd="LCD FILL FF0000" title="red"></button>
+        <button class="swatch" style="background:#00ff00" data-needs="conn" data-cmd="LCD FILL 00FF00" title="green"></button>
+        <button class="swatch" style="background:#0000ff" data-needs="conn" data-cmd="LCD FILL 0000FF" title="blue"></button>
+        <button class="swatch" style="background:#ffffff" data-needs="conn" data-cmd="LCD FILL FFFFFF" title="white"></button>
+        <button class="swatch" style="background:#000" data-needs="conn" data-cmd="LCD FILL 000000" title="black"></button>
+        <span class="sub">invert</span>
+        <button data-needs="conn" data-cmd="LCD INV 1">on</button><button data-needs="conn" data-cmd="LCD INV 0">off</button>
+      </div>
+      <div><span class="sub">Backlight <b id="blVal">255</b></span><input type="range" id="bl" min="0" max="255" value="255" data-needs="conn"></div>
+      <div class="tests"></div>
+      <details><summary>If something fails</summary><ul>
+        <li><b>Completely dark:</b> backlight. Check BLK→GPIO21 and VCC→<b>3V3</b>. Drag the backlight slider; if it never lights, the BLK wire or VCC is off.</li>
+        <li><b>Lit but blank/white:</b> data lines. Check SCL→12, SDA→11, CS→10, DC→9, RES→14. SCL/SDA swapped is the most common mistake.</li>
+        <li><b>Black shows white, red shows cyan:</b> click <b>invert off</b>. Some clone panels ship un-inverted.</li>
+        <li><b>Red and blue swapped:</b> the panel is BGR; tell the firmware dev (one register change).</li>
+        <li><b>Red frame missing on one edge / garbage strip:</b> wrong offset; the panel may not be 170×320. Measure it and tell us.</li>
+        <li>Speed test should report well above 15 fps. Much lower means a bad joint on SCL.</li>
+      </ul></details>
+    </div>
+
+    <!-- SERVOS -->
+    <div class="card" data-group="servos">
+      <div class="top"><h2>4 · Arms (servos)</h2><span class="score"></span></div>
+      <div class="sub">Needs the <b>5 V brick</b> plugged in. Arms are limited to 20–160° so they never grind into their end stops.</div>
+      <div><span class="sub">Left arm (GPIO15) <b id="slVal">90</b>°</span><input type="range" id="sl" min="20" max="160" value="90" data-needs="conn"></div>
+      <div><span class="sub">Right arm (GPIO16) <b id="srVal">90</b>°</span><input type="range" id="sr" min="20" max="160" value="90" data-needs="conn"></div>
+      <div class="row">
+        <button data-needs="conn" id="btnCenter">Center both</button>
+        <button data-needs="conn" data-cmd="SERVO SWEEP" data-long>Sweep</button>
+        <button data-needs="conn" data-cmd="SERVO WAVE" data-long>Wave (stress)</button>
+        <button data-needs="conn" data-cmd="SERVO OFF">Release</button>
+      </div>
+      <div class="tests"></div>
+      <details><summary>If something fails</summary><ul>
+        <li><b>"needs the 5 V brick":</b> plug the brick in; card 2 must say <i>brick on</i>.</li>
+        <li><b>Doesn't move, no buzz:</b> servo red/brown wires aren't getting brick 5 V/GND. Check the power board.</li>
+        <li><b>Twitches randomly or jitters:</b> missing <b>common ground</b> between the brick GND and the ESP32 GND. The signal needs a shared reference.</li>
+        <li><b>Board disconnects during Wave:</b> brown-out. The servos are pulling the rail down. Check the 1000 µF capacitor polarity/placement and that servos are NOT on the ESP32's 5V pin.</li>
+        <li><b>Moves the "wrong" way:</b> that's fine; it's a mounting thing and is fixed in software.</li>
+      </ul></details>
+    </div>
+
+    <!-- AUDIO -->
+    <div class="card" data-group="audio">
+      <div class="top"><h2>5 · Speaker (I2S amp)</h2><span class="score"></span></div>
+      <div class="sub">Needs the <b>5 V brick</b>. Start quiet: volume is % of full scale.</div>
+      <div class="row">
+        <span class="sub">Hz</span><input type="number" id="toneHz" value="440" min="50" max="12000">
+        <span class="sub">ms</span><input type="number" id="toneMs" value="800" min="20" max="5000">
+        <span class="sub">vol</span><input type="number" id="toneVol" value="25" min="1" max="100">
+        <button data-needs="conn" id="btnTone">Play tone</button>
+      </div>
+      <div class="row">
+        <button data-needs="conn" id="btnSweep" data-long>Sweep 150 Hz→6 kHz</button>
+        <button data-needs="conn" id="btnMelody">Melody</button>
+        <button data-needs="conn" data-cmd="PSRAMAUDIO" data-long>PSRAM playback</button>
+      </div>
+      <div class="tests"></div>
+      <details><summary>If something fails</summary><ul>
+        <li><b>Silent:</b> amp VIN must come from the brick's +5V and its GND to common ground. Then check BCLK→4, LRC→5, DIN→6 (BCLK/LRC swapped = silence).</li>
+        <li><b>Silent, wiring correct:</b> the amp's SD pin must not be tied to GND (leave it unconnected). Speaker wires go to the amp's +/− terminals, never to GND.</li>
+        <li><b>Distorted at higher volume:</b> lower the vol. Without a GAIN connection the amp is at 9 dB, and small speakers distort easily.</li>
+        <li><b>Constant hum/whine:</b> missing 100 µF + 0.1 µF at the amp VIN, or the ground is daisy-chained instead of star-wired.</li>
+        <li><b>Board disconnects on loud tones:</b> brown-out; same fix as the servos.</li>
+      </ul></details>
+    </div>
+
+    <!-- PIEZO -->
+    <div class="card" data-group="piezo">
+      <div class="top"><h2>6 · Piezo chirp</h2><span class="score"></span></div>
+      <div class="row">
+        <button data-needs="conn" data-cmd="PIEZO 4000 300">Beep 4 kHz</button>
+        <button data-needs="conn" data-cmd="PIEZO 2000 300">Beep 2 kHz</button>
+        <button data-needs="conn" data-cmd="PIEZO CHIRP">Chirp</button>
+      </div>
+      <div class="tests"></div>
+      <details><summary>If something fails</summary><ul>
+        <li><b>Silent:</b> check GPIO17 → piezo + and the piezo − → GND.</li>
+        <li><b>Same pitch for both beeps:</b> it's an <i>active</i> buzzer (has a built-in oscillator). It works, but it can't chirp. A passive piezo is the right part.</li>
+        <li><b>Very quiet:</b> normal for a bare piezo disc. 2.7–4 kHz is its loudest range.</li>
+      </ul></details>
+    </div>
+  </section>
+
+  <aside>
+    <div class="card">
+      <div class="top"><h2 id="sumTitle">Robot A results</h2><span class="score" id="sumScore"></span></div>
+      <div class="progress"><i id="sumBar"></i></div>
+      <div class="row">
+        <button id="btnCopy">Copy report</button>
+        <button id="btnReset">Clear Robot A</button>
+      </div>
+    </div>
+    <div class="card" style="flex:1;min-height:0">
+      <div class="top"><h2>Serial log</h2><button id="btnClearLog" style="margin-left:auto">Clear</button></div>
+      <div class="log" id="log"></div>
+      <form class="row" id="rawForm"><input type="text" id="raw" placeholder="HELP, INFO, SERVO L 120…" style="flex:1;width:auto" data-needs="conn"><button data-needs="conn">Send</button></form>
+    </div>
+    <div class="card help">
+      <h2>How to use</h2>
+      <ol>
+        <li>Flash <code>PlantBotTest.ino</code> (see README).</li>
+        <li>Plug the <b>USB</b> (native) port into the laptop, click <b>Connect</b>, pick the port.</li>
+        <li>Go top to bottom: board and display first on USB only, then plug in the brick for power, arms and speaker.</li>
+        <li>Mark each check Pass/Fail. Results are kept per robot in this browser.</li>
+      </ol>
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- test catalogue
+// auto: filled in by the page from a firmware reply; the rest are judged by eye/ear.
+const TESTS = {
+  board: [
+    {id:"ping",  name:"Talks over USB", look:"PING gets PONG back.", auto:true},
+    {id:"psram", name:"8 MB PSRAM works", look:"INFO reports psram_mb=8 and a 512 KB write/read passes.", auto:true},
+    {id:"led",   name:"RGB LED", look:"Red, green and blue buttons show the right colours."},
+  ],
+  power: [
+    {id:"senseOn",  name:"Brick detected", look:"With the brick on: brick on, pin around 3000 mV.", auto:true},
+    {id:"senseOff", name:"Brick off reads low", look:"Unplug the brick: pin drops under 500 mV.", auto:true},
+  ],
+  display: [
+    {id:"pattern", name:"Test pattern", look:"8 colour bars in order, red frame touching all four edges, text readable."},
+    {id:"colors",  name:"True colours", look:"Red fill is red, white is white, black is black."},
+    {id:"bl",      name:"Backlight dims", look:"Slider at 0 goes dark, 255 is bright."},
+    {id:"face",    name:"Face draws", look:"Happy and sad faces look right side up."},
+  ],
+  servos: [
+    {id:"left",  name:"Left arm follows slider", look:"Smooth, no buzzing at rest."},
+    {id:"right", name:"Right arm follows slider", look:"Smooth, no buzzing at rest."},
+    {id:"wave",  name:"Wave without a reset", look:"Both arms wave 3× and the page stays connected.", auto:true},
+  ],
+  audio: [
+    {id:"tone",  name:"Clean 440 Hz tone", look:"Steady pitch, no crackle, no buzz between tones."},
+    {id:"sweep", name:"Sweep sounds smooth", look:"Rises evenly; some small speakers fade near the ends."},
+    {id:"psram", name:"PSRAM playback", look:"2 s warble plays with no gaps (the path the voice uses).", auto:true},
+  ],
+  piezo: [
+    {id:"beep", name:"Beeps at two pitches", look:"4 kHz is clearly higher than 2 kHz."},
+  ],
+};
+
+// ---------------------------------------------------------------- results (per robot, in localStorage)
+const STORE_KEY = "plantbot-testbench-v1";
+let robot = "A";
+let results = { A:{}, B:{} };
+try { const s = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); if (s && s.A && s.B) results = s; } catch (e) {}
+try { const r = localStorage.getItem(STORE_KEY + "-robot"); if (r === "A" || r === "B") robot = r; } catch (e) {}
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(results)); localStorage.setItem(STORE_KEY + "-robot", robot); } catch (e) {}
+}
+function mark(group, id, state, why) {
+  const key = group + "." + id;
+  if (state === null) delete results[robot][key];
+  else results[robot][key] = { state, why: why || "", at: new Date().toISOString() };
+  save(); renderTests();
+}
+
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+
+function renderTests() {
+  let total = 0, passed = 0, failed = 0;
+  for (const card of $$(".card[data-group]")) {
+    const g = card.dataset.group, box = card.querySelector(".tests");
+    let gp = 0;
+    box.innerHTML = TESTS[g].map(t => {
+      const r = results[robot][g + "." + t.id], st = r ? r.state : "";
+      total++; if (st === "pass") { passed++; gp++; } if (st === "fail") failed++;
+      return `<div class="test ${st}" data-key="${g}.${t.id}">
+        <span class="name">${esc(t.name)}${t.auto ? ' <span class="sub">· auto</span>' : ""}</span>
+        <span class="btns"><button class="bp" title="pass">✓</button><button class="bf" title="fail">✗</button></span>
+        <span class="look">${esc(t.look)}</span>
+        ${st === "fail" && r.why ? `<span class="why">${esc(r.why)}</span>` : ""}
+      </div>`;
+    }).join("");
+    card.querySelector(".score").textContent = `${gp}/${TESTS[g].length}`;
+  }
+  $("#sumTitle").textContent = `Robot ${robot} results`;
+  $("#sumScore").textContent = `${passed}/${total} passed${failed ? ` · ${failed} failed` : ""}`;
+  $("#sumBar").style.width = (100 * passed / total) + "%";
+  $("#btnReset").textContent = `Clear Robot ${robot}`;
+  for (const b of $$("#robotSeg button")) b.classList.toggle("sel", b.dataset.r === robot);
+}
+$("#cards").addEventListener("click", e => {
+  const b = e.target.closest(".test button"); if (!b) return;
+  const key = b.closest(".test").dataset.key, [g, id] = key.split(".");
+  const want = b.classList.contains("bp") ? "pass" : "fail";
+  const cur = results[robot][key];
+  mark(g, id, cur && cur.state === want ? null : want);   // clicking the active state again clears it
+});
+$("#robotSeg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  robot = b.dataset.r; save(); renderTests();
+  log("sys", `Now recording results for Robot ${robot}. Plug that robot in and reconnect if needed.`);
+});
+$("#btnReset").onclick = () => { if (confirm(`Clear all results for Robot ${robot}?`)) { results[robot] = {}; save(); renderTests(); } };
+$("#btnCopy").onclick = async () => {
+  const lines = [];
+  for (const r of ["A", "B"]) {
+    lines.push(`Plant Bot ${r}`);
+    for (const g of Object.keys(TESTS)) for (const t of TESTS[g]) {
+      const x = results[r][g + "." + t.id];
+      lines.push(`  [${x ? (x.state === "pass" ? "PASS" : "FAIL") : " -- "}] ${g}: ${t.name}${x && x.why ? " (" + x.why + ")" : ""}`);
+    }
+  }
+  const text = lines.join("\n");
+  try { await navigator.clipboard.writeText(text); log("sys", "Report copied to clipboard."); }
+  catch (e) { log("sys", text); }
+};
+
+// ---------------------------------------------------------------- log
+const logEl = $("#log");
+function log(kind, text) {
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 30;
+  const d = document.createElement("div");
+  d.className = kind;
+  const t = new Date().toLocaleTimeString([], { hour12: false });
+  d.textContent = `${t} ${kind === "tx" ? "→" : kind === "sys" ? "·" : "←"} ${text}`;
+  logEl.appendChild(d);
+  while (logEl.childElementCount > 600) logEl.firstChild.remove();
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+$("#btnClearLog").onclick = () => { logEl.textContent = ""; };
+
+// ---------------------------------------------------------------- serial transport
+// One command in flight at a time; every firmware reply is a single "OK ..." or "ERR ..." line,
+// so we match replies to commands by order. Lines starting with EVT are unsolicited events.
+let port = null, reader = null, writer = null, readDone = null, writeDone = null;
+let connected = false, userClosing = false, lastCmd = "";
+const queue = []; let inflight = null;
+
+function setConnected(on, label) {
+  connected = on;
+  $("#status").textContent = label || (on ? "Connected" : "Not connected");
+  $("#status").className = "pill" + (on ? " on" : "");
+  $("#btnConnect").textContent = on ? "Disconnect" : "Connect";
+  for (const el of $$("[data-needs=conn]")) el.disabled = !on;
+  if (!on) { $("#poll").checked = false; stopPoll(); }
+}
+
+function send(cmd, opts = {}) {
+  if (!connected) return Promise.reject(new Error("Not connected"));
+  const timeout = opts.timeout || (/SWEEP|WAVE|PSRAMAUDIO|MELODY|^TONE|SPEED|PSRAM/.test(cmd) ? 9000 : 3000);
+  return new Promise((resolve, reject) => { queue.push({ cmd, timeout, quiet: !!opts.quiet, resolve, reject }); pump(); });
+}
+async function pump() {
+  if (inflight || !queue.length || !writer) return;
+  const job = inflight = queue.shift();
+  lastCmd = job.cmd;
+  if (!job.quiet) log("tx", job.cmd);
+  job.timer = setTimeout(() => finish(job, new Error(`No reply to "${job.cmd}" in ${job.timeout / 1000}s`)), job.timeout);
+  try { await writer.write(job.cmd + "\n"); }
+  catch (e) { finish(job, e); }
+}
+function finish(job, errOrReply) {
+  if (inflight !== job) return;
+  clearTimeout(job.timer); inflight = null;
+  if (errOrReply instanceof Error) { if (!errOrReply.logged && (!job.quiet || !connected)) log("err", errOrReply.message); job.reject(errOrReply); }
+  else job.resolve(errOrReply);
+  pump();
+}
+function flushQueue(reason) {
+  if (inflight) finish(inflight, new Error(reason));
+  while (queue.length) queue.shift().reject(new Error(reason));
+}
+
+function onLine(line) {
+  line = line.replace(/\r$/, "");
+  if (!line) return;
+  const m = /^(OK|ERR)\s?(.*)$/.exec(line);
+  if (m && inflight) {
+    const job = inflight;
+    if (m[1] === "OK") { if (!job.quiet) log("rx", line); finish(job, m[2]); }
+    else { log("err", line); const e = new Error(m[2]); e.logged = true; finish(job, e); }
+    return;
+  }
+  if (line.startsWith("EVT READY")) {
+    log("evt", line);
+    if (lastCmd) warnBrownout(`The board restarted right after "${lastCmd}".`);
+    return;
+  }
+  log("rx", line);
+}
+
+async function readLoop() {
+  let buf = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) { onLine(buf.slice(0, i)); buf = buf.slice(i + 1); }
+      if (buf.length > 4096) buf = "";
+    }
+  } catch (e) { if (!userClosing && connected) log("err", "Read error: " + e.message); }
+}
+
+async function openPort(p) {
+  port = p;
+  await port.open({ baudRate: 115200, bufferSize: 8192 });
+  // Native USB ignores baud; the S3's USB-JTAG reset logic watches DTR/RTS, so keep RTS low.
+  try { await port.setSignals({ dataTerminalReady: true, requestToSend: false }); } catch (e) {}
+  const dec = new TextDecoderStream(); readDone = port.readable.pipeTo(dec.writable).catch(() => {}); reader = dec.readable.getReader();
+  const enc = new TextEncoderStream(); writeDone = enc.readable.pipeTo(port.writable).catch(() => {}); writer = enc.writable.getWriter();
+  const info = port.getInfo();
+  setConnected(true, info.usbVendorId === 0x303a ? "Connected · native USB" : "Connected");
+  readLoop();
+  if (info.usbVendorId && info.usbVendorId !== 0x303a)
+    log("sys", "This looks like the UART bridge port (CH34x/CP210x). The test firmware answers on the native USB port; if PING fails, plug into the other USB-C socket.");
+  await handshake();
+}
+
+async function handshake() {
+  for (let i = 0; i < 3; i++) {
+    try {
+      const r = await send("PING", { timeout: 1500 });
+      if (r.startsWith("PONG")) { mark("board", "ping", "pass"); await refreshInfo(); return; }
+    } catch (e) { await new Promise(r => setTimeout(r, 400)); }
+  }
+  mark("board", "ping", "fail", "No PONG: wrong port or firmware not flashed");
+}
+
+async function closePort() {
+  userClosing = true;
+  flushQueue("Disconnected");
+  try { await reader?.cancel(); } catch (e) {}
+  await readDone;
+  try { await writer?.close(); } catch (e) {}
+  await writeDone;
+  try { await port?.close(); } catch (e) {}
+  reader = writer = null; userClosing = false;
+  setConnected(false);
+}
+
+$("#btnConnect").onclick = async () => {
+  if (connected) { await closePort(); port = null; return; }
+  try {
+    const filters = $("#onlyEsp").checked ? [{ usbVendorId: 0x303a }] : [];
+    const p = await navigator.serial.requestPort({ filters });
+    await openPort(p);
+  } catch (e) {
+    if (e.name !== "NotFoundError") log("err", "Connect failed: " + e.message + (e.name === "NetworkError" ? " (is Arduino Serial Monitor still open on this port? close it)" : ""));
+  }
+};
+
+// Unplug / brown-out: native USB drops off the bus when the chip resets.
+if ("serial" in navigator) {
+  navigator.serial.addEventListener("disconnect", async e => {
+    if (e.target !== port && e.port !== port) return;
+    const was = lastCmd;
+    flushQueue("Board disconnected");
+    reader = writer = null;
+    setConnected(false, "Disconnected");
+    $("#status").classList.add("bad");
+    if (/SERVO|TONE|SWEEP|MELODY|PSRAMAUDIO/.test(was)) warnBrownout(`USB dropped during "${was}".`);
+    else log("sys", "Board disconnected.");
+  });
+  navigator.serial.addEventListener("connect", async e => {
+    const p = e.target === navigator.serial ? e.port : e.target;
+    if (!$("#autoRe").checked || connected || !port) return;
+    // Same device? The S3's native USB reports a serial number, so Chrome usually hands back the same object;
+    // fall back to matching VID/PID in case it doesn't.
+    const a = p.getInfo(), b = port.getInfo();
+    if (p !== port && !(a.usbVendorId === b.usbVendorId && a.usbProductId === b.usbProductId)) return;
+    log("sys", "Board came back; reconnecting…");
+    await new Promise(r => setTimeout(r, 600));
+    try { await openPort(p); } catch (err) { log("err", "Auto-reconnect failed: " + err.message); }
+  });
+} else {
+  $("#unsupported").classList.add("show");
+  $("#btnConnect").disabled = true;
+}
+
+function warnBrownout(what) {
+  const b = $("#brownout");
+  b.innerHTML = `<b>Power problem?</b> ${esc(what)} That is the classic sign of a <b>brown-out</b>: the 5 V rail sagged and the ESP32 reset. Check that servos and amp run from the brick (not the ESP32's 5V pin), the 1000 µF capacitor at the servos, and the common ground. <button id="dismissBo">dismiss</button>`;
+  b.classList.add("show");
+  $("#dismissBo").onclick = () => b.classList.remove("show");
+  if (/WAVE|SERVO/.test(what)) mark("servos", "wave", "fail", "Board reset/disconnected while servos moved");
+  log("evt", "Possible brown-out: " + what);
+}
+
+// ---------------------------------------------------------------- helpers for cards
+async function run(cmd, opts) {
+  try { return await send(cmd, opts); } catch (e) { return null; }
+}
+function kv(reply) {
+  const o = {}; for (const m of reply.matchAll(/(\w+)=(\S+)/g)) o[m[1]] = m[2]; return o;
+}
+// Coalesce rapid slider input: always send the newest value, never queue a backlog.
+function coalescer(make) {
+  let want = null, busy = false;
+  return async v => {
+    want = v; if (busy) return; busy = true;
+    while (want !== null) { const x = want; want = null; await run(make(x), { quiet: true }); }
+    busy = false;
+  };
+}
+
+// generic data-cmd buttons
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button[data-cmd]"); if (!b || b.disabled) return;
+  b.disabled = true;
+  const cmd = b.dataset.cmd;
+  const r = await run(cmd);
+  b.disabled = !connected;
+  if (r === null) {
+    if (cmd === "PSRAMAUDIO") mark("audio", "psram", "fail", "PSRAMAUDIO returned an error");
+    return;
+  }
+  if (cmd === "SENSE") updateSense(r);
+  if (cmd === "INFO") showInfo(r);
+  if (cmd === "SERVO WAVE") mark("servos", "wave", "pass");
+  if (cmd === "PSRAMAUDIO") mark("audio", "psram", "pass");
+});
+
+// board
+async function refreshInfo() { const r = await run("INFO"); if (r) showInfo(r); return r; }
+function showInfo(r) {
+  const k = kv(r);
+  $("#infoLine").innerHTML = `${esc(k.chip || "?")} rev ${esc(k.rev || "?")} · ${esc(k.cpu_mhz || "?")} MHz · flash <b>${esc(k.flash_mb || "?")} MB</b> · PSRAM <b>${esc(k.psram_mb || "?")} MB</b>`;
+  if (k.gate) $("#gate").checked = k.gate === "on";
+  if (k.led_pin) for (const b of $$("#ledPinSeg button")) b.classList.toggle("sel", b.dataset.p === k.led_pin);
+  if (k.sense_mv) updateSense(`SENSE mv=${k.sense_mv} power=${k.power}`);
+  return k;
+}
+$("#btnBoard").onclick = async () => {
+  const p = await run("PING");
+  mark("board", "ping", p && p.startsWith("PONG") ? "pass" : "fail", p ? "" : "No PONG");
+  const r = await run("INFO"); if (!r) return;
+  const k = showInfo(r);
+  if (+k.psram_mb < 8) { mark("board", "psram", "fail", `INFO says ${k.psram_mb} MB PSRAM; enable OPI PSRAM and re-flash`); return; }
+  const t = await run("PSRAM");
+  mark("board", "psram", t ? "pass" : "fail", t ? "" : "512 KB PSRAM write/read failed");
+  await run("LED 0 40 0");
+};
+$("#ledPinSeg").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (await run("LED PIN " + b.dataset.p) !== null) {
+    for (const x of $$("#ledPinSeg button")) x.classList.toggle("sel", x === b);
+    await run("LED 0 0 40");
+  }
+});
+
+// power
+let pollTimer = null, sawOn = false;
+function updateSense(r) {
+  const k = kv(r), mv = +k.mv;
+  if (!isFinite(mv)) return;
+  $("#senseV").textContent = (k.rail_v || (mv * 1.5 / 1000).toFixed(2)).replace(">=", "≥ ") + " V";
+  $("#senseMv").textContent = `pin ${mv} mV`;
+  const on = k.power === "yes";
+  $("#sensePill").textContent = on ? "brick on" : "brick off";
+  $("#sensePill").className = "pill " + (on ? "on" : "bad");
+  if (on) { sawOn = true; if (mv > 2500) mark("power", "senseOn", "pass"); }
+  if (!on && mv < 500 && sawOn) mark("power", "senseOff", "pass");
+  if (!on && mv >= 500 && mv <= 2500) mark("power", "senseOff", "fail", `Floating ~${mv} mV with brick off: check the 20k to GND`);
+}
+function stopPoll() { clearInterval(pollTimer); pollTimer = null; }
+$("#poll").onchange = e => {
+  stopPoll();
+  if (e.target.checked) pollTimer = setInterval(async () => {
+    if (inflight || queue.length) return;   // never delay a real test for a background read
+    const r = await run("SENSE", { quiet: true }); if (r) updateSense(r);
+  }, 1000);
+};
+$("#gate").onchange = e => run("GATE " + (e.target.checked ? 1 : 0));
+
+// display
+const sendBl = coalescer(v => "LCD BL " + v);
+$("#bl").oninput = e => { $("#blVal").textContent = e.target.value; sendBl(e.target.value); };
+
+// servos
+const sendL = coalescer(v => "SERVO L " + v), sendR = coalescer(v => "SERVO R " + v);
+$("#sl").oninput = e => { $("#slVal").textContent = e.target.value; sendL(e.target.value); };
+$("#sr").oninput = e => { $("#srVal").textContent = e.target.value; sendR(e.target.value); };
+$("#btnCenter").onclick = async () => {
+  if (await run("SERVO BOTH 90") !== null) { for (const s of ["sl", "sr"]) { $("#" + s).value = 90; $("#" + s + "Val").textContent = 90; } }
+};
+
+// audio
+const vol = () => Math.max(1, Math.min(100, +$("#toneVol").value || 25));
+$("#btnTone").onclick = () => run(`TONE ${+$("#toneHz").value || 440} ${+$("#toneMs").value || 800} ${vol()}`);
+$("#btnSweep").onclick = () => run(`SWEEP ${vol()}`);
+$("#btnMelody").onclick = () => run(`MELODY ${vol()}`);
+
+// raw
+$("#rawForm").onsubmit = async e => {
+  e.preventDefault();
+  const v = $("#raw").value.trim(); if (!v) return;
+  $("#raw").value = "";
+  const r = await run(v);
+  if (r && /^SENSE/.test(r)) updateSense(r);
+};
+
+// ---------------------------------------------------------------- boot
+setConnected(false);
+renderTests();
+log("sys", "Ready. Click Connect and pick the ESP32's native USB port.");
+</script>
+</body>
+</html>

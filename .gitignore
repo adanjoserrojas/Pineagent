@@ -1,0 +1,12 @@
+AGENTS.md
+CLAUDE.md
+PROJECT_MEMORY.md
+prompts
+docs/*
+.agents/*
+.claude/*
+.tools/*
+
+
+
+

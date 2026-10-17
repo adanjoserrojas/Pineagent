@@ -1,0 +1,128 @@
+[
+  {
+    "state": "idle",
+    "fps": 20,
+    "duration": 4.8,
+    "frames": 96,
+    "uniqueFrames": 96
+  },
+  {
+    "state": "planning",
+    "fps": 20,
+    "duration": 3.2,
+    "frames": 64,
+    "uniqueFrames": 64
+  },
+  {
+    "state": "routing",
+    "fps": 20,
+    "duration": 2.4,
+    "frames": 48,
+    "uniqueFrames": 48
+  },
+  {
+    "state": "executing",
+    "fps": 20,
+    "duration": 2,
+    "frames": 40,
+    "uniqueFrames": 40
+  },
+  {
+    "state": "awaiting_approval",
+    "fps": 20,
+    "duration": 2.8,
+    "frames": 56,
+    "uniqueFrames": 56
+  },
+  {
+    "state": "blocked",
+    "fps": 20,
+    "duration": 4,
+    "frames": 80,
+    "uniqueFrames": 80
+  },
+  {
+    "state": "error",
+    "fps": 20,
+    "duration": 2.4,
+    "frames": 48,
+    "uniqueFrames": 48
+  },
+  {
+    "state": "done",
+    "fps": 20,
+    "duration": 1.8,
+    "frames": 36,
+    "uniqueFrames": 36
+  },
+  {
+    "state": "disconnected",
+    "fps": 20,
+    "duration": 4,
+    "frames": 80,
+    "uniqueFrames": 80
+  },
+  {
+    "state": "no_motor_power",
+    "fps": 20,
+    "duration": 2,
+    "frames": 40,
+    "uniqueFrames": 40
+  },
+  {
+    "state": "team_join",
+    "fps": 20,
+    "duration": 1.6,
+    "frames": 32,
+    "uniqueFrames": 32
+  },
+  {
+    "state": "team_leave",
+    "fps": 20,
+    "duration": 1.8,
+    "frames": 36,
+    "uniqueFrames": 36
+  },
+  {
+    "state": "routing_cache",
+    "fps": 20,
+    "duration": 2.4,
+    "frames": 48,
+    "uniqueFrames": 48
+  },
+  {
+    "state": "routing_llm",
+    "fps": 20,
+    "duration": 2.4,
+    "frames": 48,
+    "uniqueFrames": 48
+  },
+  {
+    "state": "speaking",
+    "fps": 20,
+    "duration": 1.2,
+    "frames": 24,
+    "uniqueFrames": 24
+  },
+  {
+    "state": "paused",
+    "fps": 20,
+    "duration": 4,
+    "frames": 80,
+    "uniqueFrames": 80
+  },
+  {
+    "state": "parked",
+    "fps": 20,
+    "duration": 4.8,
+    "frames": 96,
+    "uniqueFrames": 96
+  },
+  {
+    "state": "reconnecting",
+    "fps": 20,
+    "duration": 1.6,
+    "frames": 32,
+    "uniqueFrames": 32
+  }
+]

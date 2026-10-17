@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="170" viewBox="0 0 320 170" fill="none"><rect id="screen" width="320" height="170" fill="#8CE6BA" /><g id="face">
+<g id="eye_L"><path d="M 86 79 Q 102 51 118 79" fill="none" stroke="#080E18" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" id="silhouette" /><path d="M 91 71.7 Q 95 66.5 99 65.6" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" id="shine_major" /><ellipse id="shine_minor" cx="116.4" cy="76.6" rx="2.2" ry="2.4" fill="#FFFFFF" /></g><g id="eye_R"><path d="M 202 79 Q 218 51 234 79" fill="none" stroke="#080E18" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" id="silhouette" /><path d="M 207 71.7 Q 211 66.5 215 65.6" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" id="shine_major" /><ellipse id="shine_minor" cx="232.4" cy="76.6" rx="2.2" ry="2.4" fill="#FFFFFF" /></g><g id="cheeks">
+<path id="detail_12" opacity="0.16" d="M53 118C61.2843 118 68 115.761 68 113C68 110.239 61.2843 108 53 108C44.7157 108 38 110.239 38 113C38 115.761 44.7157 118 53 118Z" fill="#080E18" />
+<path id="detail_13" d="M47 111L49 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_14" d="M52 111L54 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_15" d="M57 111L59 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_16" opacity="0.16" d="M267 118C275.284 118 282 115.761 282 113C282 110.239 275.284 108 267 108C258.716 108 252 110.239 252 113C252 115.761 258.716 118 267 118Z" fill="#080E18" />
+<path id="detail_17" d="M261 111L263 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_18" d="M266 111L268 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_19" d="M271 111L273 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+</g>
+<g id="mouth"><path d="M 146 112 Q 160 118 174 112 Q 172 133 160 133 Q 148 133 146 112 Z" fill="#080E18" stroke="#080E18" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" /><path d="M 153 128 Q 160 123 167 128" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" /></g></g>
+</svg>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="170" viewBox="0 0 320 170" fill="none"><rect id="screen" width="320" height="170" fill="#FFD58B" /><g id="face">
+<g id="eye_L"><path d="M 85 71 H 119 V 77 Q 119 94 102 94 Q 85 94 85 77 Z" stroke="#080E18" stroke-width="1" fill="#080E18" stroke-linecap="round" stroke-linejoin="round" /><ellipse cx="97" cy="76" rx="6.5" ry="5.5" fill="#FFFFFF" id="shine_major" /><ellipse cx="114" cy="85" rx="2.5" ry="3" fill="#FFFFFF" id="shine_minor" /><path d="M 84 71 H 120" stroke="#080E18" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" /></g><g id="eye_R"><path d="M 201 71 H 235 V 77 Q 235 94 218 94 Q 201 94 201 77 Z" stroke="#080E18" stroke-width="1" fill="#080E18" stroke-linecap="round" stroke-linejoin="round" /><ellipse cx="213" cy="76" rx="6.5" ry="5.5" fill="#FFFFFF" id="shine_major" /><ellipse cx="230" cy="85" rx="2.5" ry="3" fill="#FFFFFF" id="shine_minor" /><path d="M 200 71 H 236" stroke="#080E18" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" /></g><g id="cheeks">
+<path id="detail_16" opacity="0.16" d="M53 118C61.2843 118 68 115.761 68 113C68 110.239 61.2843 108 53 108C44.7157 108 38 110.239 38 113C38 115.761 44.7157 118 53 118Z" fill="#080E18" />
+<path id="detail_17" d="M47 111L49 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_18" d="M52 111L54 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_19" d="M57 111L59 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_20" opacity="0.16" d="M267 118C275.284 118 282 115.761 282 113C282 110.239 275.284 108 267 108C258.716 108 252 110.239 252 113C252 115.761 258.716 118 267 118Z" fill="#080E18" />
+<path id="detail_21" d="M261 111L263 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_22" d="M266 111L268 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_23" d="M271 111L273 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+</g>
+<g id="mouth"><path d="M 152 120 Q 160 122 168 120" stroke="#080E18" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" /></g></g>
+<g id="badge"><path d="M 155 20 V 32 M 165 20 V 32" stroke="#080E18" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round" /></g></svg>

@@ -1,0 +1,128 @@
+[
+  {
+    "state": "idle",
+    "frames": 96,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.186,
+    "maxAdjacentDelta": 31.708
+  },
+  {
+    "state": "planning",
+    "frames": 64,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.134,
+    "maxAdjacentDelta": 33.673
+  },
+  {
+    "state": "routing",
+    "frames": 48,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.385,
+    "maxAdjacentDelta": 42.129
+  },
+  {
+    "state": "executing",
+    "frames": 40,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.167,
+    "maxAdjacentDelta": 35.798
+  },
+  {
+    "state": "awaiting_approval",
+    "frames": 56,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.101,
+    "maxAdjacentDelta": 36.133
+  },
+  {
+    "state": "blocked",
+    "frames": 80,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.035,
+    "maxAdjacentDelta": 11.523
+  },
+  {
+    "state": "error",
+    "frames": 48,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.009,
+    "maxAdjacentDelta": 12.671
+  },
+  {
+    "state": "done",
+    "frames": 36,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.205,
+    "maxAdjacentDelta": 16.436
+  },
+  {
+    "state": "disconnected",
+    "frames": 80,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.155,
+    "maxAdjacentDelta": 30.073
+  },
+  {
+    "state": "no_motor_power",
+    "frames": 40,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.167,
+    "maxAdjacentDelta": 35.798
+  },
+  {
+    "state": "team_join",
+    "frames": 32,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.296,
+    "maxAdjacentDelta": 25.06
+  },
+  {
+    "state": "team_leave",
+    "frames": 36,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.325,
+    "maxAdjacentDelta": 59.074
+  },
+  {
+    "state": "routing_cache",
+    "frames": 48,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.385,
+    "maxAdjacentDelta": 42.129
+  },
+  {
+    "state": "routing_llm",
+    "frames": 48,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.385,
+    "maxAdjacentDelta": 42.129
+  },
+  {
+    "state": "speaking",
+    "frames": 24,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 1.459,
+    "maxAdjacentDelta": 47.892
+  },
+  {
+    "state": "paused",
+    "frames": 80,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.05,
+    "maxAdjacentDelta": 16.962
+  },
+  {
+    "state": "parked",
+    "frames": 96,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.001,
+    "maxAdjacentDelta": 0.412
+  },
+  {
+    "state": "reconnecting",
+    "frames": 32,
+    "eyeMotionEveryFrame": true,
+    "seamDelta": 0.31,
+    "maxAdjacentDelta": 44.847
+  }
+]

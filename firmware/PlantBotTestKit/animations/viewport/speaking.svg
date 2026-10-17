@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="170" viewBox="0 0 320 170" fill="none"><rect id="screen" width="320" height="170" fill="#8BC6FF" /><g id="face">
+<g id="eye_L">
+<g id="pupil_L">
+<path id="detail_05" d="M102 93.8125C111.389 93.8125 119 83.3472 119 70.4375C119 57.5278 111.389 47.0625 102 47.0625C92.6112 47.0625 85 57.5278 85 70.4375C85 83.3472 92.6112 93.8125 102 93.8125Z" fill="#080E18" />
+<path id="detail_06" d="M99.875 70.4375C104.569 70.4375 108.375 65.6805 108.375 59.8125C108.375 53.9445 104.569 49.1875 99.875 49.1875C95.1806 49.1875 91.375 53.9445 91.375 59.8125C91.375 65.6805 95.1806 70.4375 99.875 70.4375Z" fill="white" />
+<path id="detail_07" d="M112.625 91.6875C114.972 91.6875 116.875 89.309 116.875 86.375C116.875 83.441 114.972 81.0625 112.625 81.0625C110.278 81.0625 108.375 83.441 108.375 86.375C108.375 89.309 110.278 91.6875 112.625 91.6875Z" fill="white" />
+<path id="detail_08" opacity="0.8" d="M115.812 77.875C116.986 77.875 117.938 76.9236 117.938 75.75C117.938 74.5764 116.986 73.625 115.812 73.625C114.639 73.625 113.688 74.5764 113.688 75.75C113.688 76.9236 114.639 77.875 115.812 77.875Z" fill="white" />
+</g>
+</g>
+<g id="eye_R">
+<g id="pupil_R">
+<path id="detail_11" d="M218 93.8125C227.389 93.8125 235 83.3472 235 70.4375C235 57.5278 227.389 47.0625 218 47.0625C208.611 47.0625 201 57.5278 201 70.4375C201 83.3472 208.611 93.8125 218 93.8125Z" fill="#080E18" />
+<path id="detail_12" d="M215.875 70.4375C220.569 70.4375 224.375 65.6805 224.375 59.8125C224.375 53.9445 220.569 49.1875 215.875 49.1875C211.181 49.1875 207.375 53.9445 207.375 59.8125C207.375 65.6805 211.181 70.4375 215.875 70.4375Z" fill="white" />
+<path id="detail_13" d="M228.625 91.6875C230.972 91.6875 232.875 89.309 232.875 86.375C232.875 83.441 230.972 81.0625 228.625 81.0625C226.278 81.0625 224.375 83.441 224.375 86.375C224.375 89.309 226.278 91.6875 228.625 91.6875Z" fill="white" />
+<path id="detail_14" opacity="0.8" d="M231.812 77.875C232.986 77.875 233.938 76.9236 233.938 75.75C233.938 74.5764 232.986 73.625 231.812 73.625C230.639 73.625 229.688 74.5764 229.688 75.75C229.688 76.9236 230.639 77.875 231.812 77.875Z" fill="white" />
+</g>
+</g>
+<g id="cheeks">
+<path id="detail_16" opacity="0.16" d="M53 118C61.2843 118 68 115.761 68 113C68 110.239 61.2843 108 53 108C44.7157 108 38 110.239 38 113C38 115.761 44.7157 118 53 118Z" fill="#080E18" />
+<path id="detail_17" d="M47 111L49 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_18" d="M52 111L54 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_19" d="M57 111L59 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_20" opacity="0.16" d="M267 118C275.284 118 282 115.761 282 113C282 110.239 275.284 108 267 108C258.716 108 252 110.239 252 113C252 115.761 258.716 118 267 118Z" fill="#080E18" />
+<path id="detail_21" d="M261 111L263 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_22" d="M266 111L268 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+<path id="detail_23" d="M271 111L273 115" stroke="#F2F5FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+</g>
+<g id="mouth"><ellipse cx="160" cy="120" rx="7" ry="10" fill="#080E18" /><path d="M 157 125 Q 160 127 163 125" stroke="#FFFFFF" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" /></g></g>
+<g id="badge" /></svg>

@@ -1,0 +1,25 @@
+{
+  "target": "C:\\Users\\17866\\Downloads\\Adan_Rojas_Workspace_2025\\Pear\\firmware\\PlantBotTestKit",
+  "backup": "C:\\Users\\17866\\Downloads\\Adan_Rojas_Workspace_2025\\Pear\\firmware\\PlantBotTestKit\\before-animated-faces-20261014-230210",
+  "binary": "C:\\Users\\17866\\Downloads\\Adan_Rojas_Workspace_2025\\Pear\\firmware\\PlantBotTestKit\\prebuilt\\PlantBotTest-AnimatedFaces-8MB-merged.bin",
+  "binaryBytes": 4187056,
+  "binarySha256": "3027b75a11d0b784e201488a254343b1aedefd4c6594895c6849da6e60dc168c",
+  "copiedFiles": [
+    "PlantBotTest/PlantBotTest.ino",
+    "PlantBotTest/FaceAssets.h",
+    "PlantBotTest/FaceDecoder.h",
+    "PlantBotTest/FacePlayer.h",
+    "PlantBotTest/partitions.csv",
+    "platformio.ini",
+    "partitions-face-8mb.csv",
+    "PlantBot-TestBench.html",
+    "VIEWPORT_ANIMATIONS.md"
+  ],
+  "frames": 984,
+  "states": 18,
+  "fps": 20,
+  "build": "ESP32-S3 / Arduino 3.3.12 / N8R8 qio_opi / native USB",
+  "flashBytes": 4113159,
+  "staticRamBytes": 25156,
+  "physicalScreenTest": "pending"
+}

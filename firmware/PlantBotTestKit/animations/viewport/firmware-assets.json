@@ -1,0 +1,149 @@
+{
+  "totalRleBytes": 1800461,
+  "states": [
+    {
+      "state": "idle",
+      "frames": 96,
+      "fps": 20,
+      "uniqueQuantizedFrames": 96,
+      "rleBytes": 180922,
+      "paletteColors": 64
+    },
+    {
+      "state": "planning",
+      "frames": 64,
+      "fps": 20,
+      "uniqueQuantizedFrames": 64,
+      "rleBytes": 119868,
+      "paletteColors": 64
+    },
+    {
+      "state": "routing",
+      "frames": 48,
+      "fps": 20,
+      "uniqueQuantizedFrames": 48,
+      "rleBytes": 92279,
+      "paletteColors": 64
+    },
+    {
+      "state": "executing",
+      "frames": 40,
+      "fps": 20,
+      "uniqueQuantizedFrames": 40,
+      "rleBytes": 83763,
+      "paletteColors": 64
+    },
+    {
+      "state": "awaiting_approval",
+      "frames": 56,
+      "fps": 20,
+      "uniqueQuantizedFrames": 56,
+      "rleBytes": 116717,
+      "paletteColors": 64
+    },
+    {
+      "state": "blocked",
+      "frames": 80,
+      "fps": 20,
+      "uniqueQuantizedFrames": 80,
+      "rleBytes": 95416,
+      "paletteColors": 64
+    },
+    {
+      "state": "error",
+      "frames": 48,
+      "fps": 20,
+      "uniqueQuantizedFrames": 48,
+      "rleBytes": 88434,
+      "paletteColors": 64
+    },
+    {
+      "state": "done",
+      "frames": 48,
+      "fps": 20,
+      "uniqueQuantizedFrames": 48,
+      "rleBytes": 81643,
+      "paletteColors": 64
+    },
+    {
+      "state": "disconnected",
+      "frames": 80,
+      "fps": 20,
+      "uniqueQuantizedFrames": 80,
+      "rleBytes": 202759,
+      "paletteColors": 64
+    },
+    {
+      "state": "no_motor_power",
+      "frames": 40,
+      "fps": 20,
+      "uniqueQuantizedFrames": 40,
+      "rleBytes": 95589,
+      "paletteColors": 64
+    },
+    {
+      "state": "team_join",
+      "frames": 32,
+      "fps": 20,
+      "uniqueQuantizedFrames": 32,
+      "rleBytes": 55668,
+      "paletteColors": 64
+    },
+    {
+      "state": "team_leave",
+      "frames": 36,
+      "fps": 20,
+      "uniqueQuantizedFrames": 36,
+      "rleBytes": 76500,
+      "paletteColors": 64
+    },
+    {
+      "state": "routing_cache",
+      "frames": 48,
+      "fps": 20,
+      "uniqueQuantizedFrames": 48,
+      "rleBytes": 92161,
+      "paletteColors": 64
+    },
+    {
+      "state": "routing_llm",
+      "frames": 48,
+      "fps": 20,
+      "uniqueQuantizedFrames": 48,
+      "rleBytes": 94907,
+      "paletteColors": 64
+    },
+    {
+      "state": "speaking",
+      "frames": 24,
+      "fps": 20,
+      "uniqueQuantizedFrames": 24,
+      "rleBytes": 42959,
+      "paletteColors": 64
+    },
+    {
+      "state": "paused",
+      "frames": 80,
+      "fps": 20,
+      "uniqueQuantizedFrames": 80,
+      "rleBytes": 99010,
+      "paletteColors": 64
+    },
+    {
+      "state": "parked",
+      "frames": 96,
+      "fps": 20,
+      "uniqueQuantizedFrames": 96,
+      "rleBytes": 111537,
+      "paletteColors": 64
+    },
+    {
+      "state": "reconnecting",
+      "frames": 32,
+      "fps": 20,
+      "uniqueQuantizedFrames": 32,
+      "rleBytes": 70329,
+      "paletteColors": 64
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+[
+  {
+    "state": "idle",
+    "frames": 96,
+    "everyFrameMovesEyes": true,
+    "background": "FFFFFF",
+    "seamDelta": 0.03579044117647059,
+    "maxAdjacentDelta": 14.443860294117648
+  },
+  {
+    "state": "planning",
+    "frames": 64,
+    "everyFrameMovesEyes": true,
+    "background": "8BC6FF",
+    "seamDelta": 0.094375,
+    "maxAdjacentDelta": 13.806360294117647
+  },
+  {
+    "state": "routing",
+    "frames": 48,
+    "everyFrameMovesEyes": true,
+    "background": "C8B3FF",
+    "seamDelta": 0.35501838235294114,
+    "maxAdjacentDelta": 9.890404411764706
+  },
+  {
+    "state": "executing",
+    "frames": 40,
+    "everyFrameMovesEyes": true,
+    "background": "8CE6BA",
+    "seamDelta": 0.2126470588235294,
+    "maxAdjacentDelta": 12.62424632352941
+  },
+  {
+    "state": "awaiting_approval",
+    "frames": 56,
+    "everyFrameMovesEyes": true,
+    "background": "FFD58B",
+    "seamDelta": 0.14373161764705883,
+    "maxAdjacentDelta": 9.670275735294117
+  },
+  {
+    "state": "blocked",
+    "frames": 80,
+    "everyFrameMovesEyes": true,
+    "background": "D5BB86",
+    "seamDelta": 0.15514705882352942,
+    "maxAdjacentDelta": 2.7122242647058825
+  },
+  {
+    "state": "error",
+    "frames": 48,
+    "everyFrameMovesEyes": true,
+    "background": "FF9CA8",
+    "seamDelta": 0.018308823529411766,
+    "maxAdjacentDelta": 4.745220588235294
+  },
+  {
+    "state": "done",
+    "frames": 48,
+    "everyFrameMovesEyes": true,
+    "background": "8CE6BA",
+    "seamDelta": 0.1925,
+    "maxAdjacentDelta": 9.460514705882353
+  },
+  {
+    "state": "disconnected",
+    "frames": 80,
+    "everyFrameMovesEyes": true,
+    "background": "C7D3E2",
+    "seamDelta": 0.0316360294117647,
+    "maxAdjacentDelta": 7.8359375
+  },
+  {
+    "state": "no_motor_power",
+    "frames": 40,
+    "everyFrameMovesEyes": true,
+    "background": "8CE6BA",
+    "seamDelta": 0.2126470588235294,
+    "maxAdjacentDelta": 12.62424632352941
+  },
+  {
+    "state": "team_join",
+    "frames": 32,
+    "everyFrameMovesEyes": true,
+    "background": "FFFFFF",
+    "seamDelta": 0.5795036764705882,
+    "maxAdjacentDelta": 5.073272058823529
+  },
+  {
+    "state": "team_leave",
+    "frames": 36,
+    "everyFrameMovesEyes": true,
+    "background": "FFFFFF",
+    "seamDelta": 0.20216911764705883,
+    "maxAdjacentDelta": 12.98154411764706
+  },
+  {
+    "state": "routing_cache",
+    "frames": 48,
+    "everyFrameMovesEyes": true,
+    "background": "C8B3FF",
+    "seamDelta": 0.3514889705882353,
+    "maxAdjacentDelta": 9.845349264705883
+  },
+  {
+    "state": "routing_llm",
+    "frames": 48,
+    "everyFrameMovesEyes": true,
+    "background": "C8B3FF",
+    "seamDelta": 0.3894669117647059,
+    "maxAdjacentDelta": 9.946231617647058
+  },
+  {
+    "state": "speaking",
+    "frames": 24,
+    "everyFrameMovesEyes": true,
+    "background": "8BC6FF",
+    "seamDelta": 0.9065624999999999,
+    "maxAdjacentDelta": 16.644963235294117
+  },
+  {
+    "state": "paused",
+    "frames": 80,
+    "everyFrameMovesEyes": true,
+    "background": "FFD58B",
+    "seamDelta": 0.17830882352941177,
+    "maxAdjacentDelta": 3.0285661764705885
+  },
+  {
+    "state": "parked",
+    "frames": 96,
+    "everyFrameMovesEyes": true,
+    "background": "D5BB86",
+    "seamDelta": 0.2513235294117647,
+    "maxAdjacentDelta": 0.6700919117647058
+  },
+  {
+    "state": "reconnecting",
+    "frames": 32,
+    "everyFrameMovesEyes": true,
+    "background": "C7D3E2",
+    "seamDelta": 0.35191176470588237,
+    "maxAdjacentDelta": 15.006636029411766
+  }
+]
