@@ -1,138 +1,51 @@
-# HTTPS front door: an Application Load Balancer (ALB) with a free ACM certificate (LLD: ALB + ACM).
-# Created only once var.domain_name is set.
+# HTTPS without a load balancer. Created only once var.domain_name is set.
 #
-#   browser ──https/wss :443──► ALB (TLS ends here) ──http :3001──► Node server
+#   browser ─https/wss :443─► Elastic IP ─► Caddy on the instance ─► 127.0.0.1:3001 Node
+#           ─http :80──────►              (Let's Encrypt challenge, then redirect to https)
 #
-# The ALB holds the certificate, so the Node server never handles TLS. WebSockets work through an
-# ALB as-is: the HTTP Upgrade request passes through and the connection stays open.
+# Caddy gets and renews a free Let's Encrypt certificate by itself. (ACM certificates can't be used
+# here: AWS only installs them on its own front doors, like load balancers and CloudFront.) The
+# LLD's ALB + ACM costs ~$18/month and adds a hop; for one server at a hackathon this is enough.
+# The tradeoff: the instance itself faces the internet on 80/443, so Caddy is the only thing
+# listening there and Node binds to localhost only.
 
 locals {
-  https      = var.domain_name != ""
-  route53    = local.https && var.route53_zone_id != ""
-  alb_subnet = sort(data.aws_subnets.default.ids) # an ALB needs subnets in at least two AZs
+  https = var.domain_name != ""
 }
 
-# --- Certificate ------------------------------------------------------------------------------
-# ACM issues the certificate only after you prove you control the domain, by publishing a CNAME
-# record it gives you (DNS validation). With Route 53 we create that record; with any other DNS
-# provider, copy it from the `certificate_validation_records` output, and `apply` waits for it.
+# A fixed public address for the DNS record. An instance's own public IP changes whenever it is
+# stopped or replaced; an Elastic IP stays and is simply re-associated with the new instance.
+resource "aws_eip" "api" {
+  count  = local.https ? 1 : 0
+  domain = "vpc"
 
-resource "aws_acm_certificate" "api" {
+  tags = { Name = "pineagent-api" }
+}
+
+resource "aws_eip_association" "api" {
+  count         = local.https ? 1 : 0
+  allocation_id = aws_eip.api[0].id
+  instance_id   = aws_instance.app.id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "app_https" {
   count             = local.https ? 1 : 0
-  domain_name       = var.domain_name
-  validation_method = "DNS"
-
-  lifecycle {
-    create_before_destroy = true # a replacement cert is issued before the old one is removed
-  }
+  security_group_id = aws_security_group.app.id
+  description       = "HTTPS and WSS, to Caddy"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv4         = "0.0.0.0/0"
 }
 
-resource "aws_route53_record" "cert_validation" {
-  for_each = local.route53 ? {
-    for o in aws_acm_certificate.api[0].domain_validation_options : o.domain_name => o
-  } : {}
-  zone_id = var.route53_zone_id
-  name    = each.value.resource_record_name
-  type    = each.value.resource_record_type
-  records = [each.value.resource_record_value]
-  ttl     = 300
-}
-
-resource "aws_acm_certificate_validation" "api" {
-  count                   = local.https ? 1 : 0
-  certificate_arn         = aws_acm_certificate.api[0].arn
-  validation_record_fqdns = local.route53 ? [for r in aws_route53_record.cert_validation : r.fqdn] : null
-
-  timeouts {
-    create = "45m" # time to add the CNAME by hand when DNS isn't in Route 53
-  }
-}
-
-# --- Load balancer ----------------------------------------------------------------------------
-
-resource "aws_lb" "api" {
-  count              = local.https ? 1 : 0
-  name               = "pineagent"
-  load_balancer_type = "application"
-  subnets            = local.alb_subnet
-  security_groups    = [aws_security_group.alb[0].id]
-
-  # Close a connection after this long with no bytes either way. Socket.IO pings every 25 s, so
-  # live sockets never hit it.
-  idle_timeout = 120
-}
-
-resource "aws_lb_target_group" "api" {
-  count    = local.https ? 1 : 0
-  name     = "pineagent-api"
-  port     = 3001
-  protocol = "HTTP"
-  vpc_id   = data.aws_vpc.default.id
-
-  # The ALB only sends traffic to a target that answers this; it's also your quickest "is the
-  # server up?" signal in the console.
-  health_check {
-    path                = "/health"
-    matcher             = "200"
-    interval            = 15
-    healthy_threshold   = 2
-    unhealthy_threshold = 3
-  }
-
-  # One server, so connection draining on deploys can be short.
-  deregistration_delay = 10
-}
-
-resource "aws_lb_target_group_attachment" "api" {
-  count            = local.https ? 1 : 0
-  target_group_arn = aws_lb_target_group.api[0].arn
-  target_id        = aws_instance.app.id
-  port             = 3001
-}
-
-resource "aws_lb_listener" "https" {
+# Let's Encrypt proves you control the domain by fetching a token over plain HTTP on port 80.
+# Caddy answers that, and redirects every other http:// request to https://.
+resource "aws_vpc_security_group_ingress_rule" "app_http" {
   count             = local.https ? 1 : 0
-  load_balancer_arn = aws_lb.api[0].arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06" # TLS 1.2+ only
-  certificate_arn   = aws_acm_certificate_validation.api[0].certificate_arn
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.api[0].arn
-  }
-}
-
-resource "aws_lb_listener" "http_redirect" {
-  count             = local.https ? 1 : 0
-  load_balancer_arn = aws_lb.api[0].arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type = "redirect"
-    redirect {
-      port        = "443"
-      protocol    = "HTTPS"
-      status_code = "HTTP_301"
-    }
-  }
-}
-
-# --- DNS name → load balancer -----------------------------------------------------------------
-# An alias record is Route 53's free, AWS-aware CNAME: it follows the ALB's changing IPs. Outside
-# Route 53, point a CNAME for domain_name at the `alb_dns_name` output instead.
-
-resource "aws_route53_record" "api" {
-  count   = local.route53 ? 1 : 0
-  zone_id = var.route53_zone_id
-  name    = var.domain_name
-  type    = "A"
-
-  alias {
-    name                   = aws_lb.api[0].dns_name
-    zone_id                = aws_lb.api[0].zone_id
-    evaluate_target_health = true
-  }
+  security_group_id = aws_security_group.app.id
+  description       = "HTTP: ACME challenge and redirect to HTTPS" # no apostrophes: AWS rejects them here
+  ip_protocol       = "tcp"
+  from_port         = 80
+  to_port           = 80
+  cidr_ipv4         = "0.0.0.0/0"
 }

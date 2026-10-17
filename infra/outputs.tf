@@ -13,20 +13,9 @@ output "shell" {
   value       = "aws ssm start-session --profile ${var.aws_profile} --region ${var.region} --target ${aws_instance.app.id}"
 }
 
-output "alb_dns_name" {
-  description = "Point a CNAME for domain_name here when DNS isn't in Route 53."
-  value       = local.https ? aws_lb.api[0].dns_name : null
-}
-
-output "certificate_validation_records" {
-  description = "Add these CNAMEs at your DNS provider so ACM can issue the certificate (not needed with Route 53)."
-  value = local.https && !local.route53 ? [
-    for o in aws_acm_certificate.api[0].domain_validation_options : {
-      name  = o.resource_record_name
-      type  = o.resource_record_type
-      value = o.resource_record_value
-    }
-  ] : []
+output "public_ip" {
+  description = "Add an A record for domain_name pointing here."
+  value       = local.https ? aws_eip.api[0].public_ip : null
 }
 
 output "url" {

@@ -24,13 +24,7 @@ variable "data_volume_gb" {
 }
 
 variable "domain_name" {
-  description = "Public hostname for HTTPS, e.g. api.example.com. Empty = no load balancer or certificate yet (phase 1)."
-  type        = string
-  default     = ""
-}
-
-variable "route53_zone_id" {
-  description = "Route 53 hosted zone that owns domain_name. Empty = your DNS is elsewhere; add the records from the outputs by hand."
+  description = "Public hostname for HTTPS, e.g. api.example.com. Point its DNS A record at the public_ip output. Empty = no HTTPS yet (phase 1)."
   type        = string
   default     = ""
 }

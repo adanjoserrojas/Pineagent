@@ -40,7 +40,8 @@ mount -a
 chown pineagent:pineagent /workspaces
 
 # --- Placeholder until the real server is deployed (phase 3) ----------------------------------
-# Answers the load balancer's health check so the infrastructure can be tested on its own.
+# Answers /health so the infrastructure can be tested on its own. Localhost only: from outside,
+# everything goes through Caddy.
 # The code lives in its own file: systemd rewrites escapes like \n inside ExecStart= lines.
 mkdir -p /opt/pineagent
 cat > /opt/pineagent/placeholder.js <<'JS'
@@ -50,7 +51,7 @@ require("http")
     res.writeHead(ok ? 200 : 404, { "content-type": "text/plain" });
     res.end(ok ? "ok (placeholder)\n" : "not found\n");
   })
-  .listen(3001);
+  .listen(3001, "127.0.0.1");
 JS
 cat > /etc/systemd/system/pineagent-placeholder.service <<'UNIT'
 [Unit]
@@ -67,5 +68,56 @@ WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
 systemctl enable --now pineagent-placeholder
+%{ if domain_name != "" ~}
+
+# --- Caddy: HTTPS for ${domain_name} ---------------------------------------------------------
+# Terminates TLS with a Let's Encrypt certificate it obtains and renews itself, redirects http to
+# https, and proxies everything (WebSockets included) to the Node server on localhost.
+CADDY_TAR=caddy_${caddy_version}_linux_amd64.tar.gz
+CADDY_BASE=https://github.com/caddyserver/caddy/releases/download/v${caddy_version}
+cd /tmp
+curl -fsSLO "$CADDY_BASE/$CADDY_TAR"
+curl -fsSLO "$CADDY_BASE/caddy_${caddy_version}_checksums.txt"
+sha512sum -c --ignore-missing "caddy_${caddy_version}_checksums.txt"
+tar -xzf "$CADDY_TAR" -C /usr/local/bin caddy
+caddy version
+
+id caddy >/dev/null 2>&1 || useradd --system --home-dir /var/lib/caddy --create-home --shell /sbin/nologin caddy
+# Certificates live on the data volume, so a rebuilt instance reuses them instead of asking
+# Let's Encrypt again (it allows only 5 identical certificates a week).
+install -d -o caddy -g caddy -m 700 /workspaces/.caddy
+mkdir -p /etc/caddy
+cat > /etc/caddy/Caddyfile <<'CADDY'
+${domain_name} {
+	encode
+	reverse_proxy 127.0.0.1:3001
+}
+CADDY
+
+cat > /etc/systemd/system/caddy.service <<'UNIT'
+[Unit]
+Description=Caddy (HTTPS for Pineagent)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=caddy
+Group=caddy
+Environment=XDG_DATA_HOME=/workspaces/.caddy XDG_CONFIG_HOME=/var/lib/caddy/config
+ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --force
+# Binding ports 80 and 443 normally needs root; this grants just that one ability.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now caddy
+%{ endif ~}
 
 echo "bootstrap done $(date -Is)"

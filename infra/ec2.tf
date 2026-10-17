@@ -44,6 +44,8 @@ resource "aws_instance" "app" {
   # is reattached, so the repos survive.
   user_data = templatefile("${path.module}/bootstrap.sh.tftpl", {
     data_volume_id = aws_ebs_volume.workspaces.id
+    domain_name    = var.domain_name
+    caddy_version  = "2.11.7"
   })
   user_data_replace_on_change = true
 
