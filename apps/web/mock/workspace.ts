@@ -21,6 +21,10 @@ export class Workspace {
   private readonly expiredFor = new Map<string, string[]>();
   // Disk writes per path run in order even though acks are async.
   private readonly writes = new Map<string, Promise<void>>();
+  // Who edited each path since its last commit; decides whose commit a change belongs to.
+  private readonly editors = new Map<string, Set<string>>();
+  // While Git works on the tree, edits to the affected paths wait here instead of landing mid-commit.
+  private gate: { paths: ReadonlySet<string> | "all"; open: Promise<void> } | null = null;
 
   constructor(
     readonly root: string,
@@ -31,6 +35,8 @@ export class Workspace {
   // Repo-relative path → absolute path inside root, or null if it escapes the workspace.
   resolvePath(path: unknown): string | null {
     if (typeof path !== "string" || path === "" || path.startsWith("/") || path.includes("\0")) return null;
+    // Git's own files are never readable or editable through the workspace.
+    if (path.split(/[\\/]/).includes(".git")) return null;
     const full = resolve(this.root, path);
     return full.startsWith(this.root + sep) ? full : null;
   }
@@ -126,6 +132,8 @@ export class Workspace {
   // Accepted only from the lock holder, built on the current version, with ops that fit the text.
   async applyOps(path: string, userId: string, baseVersion: number, ops: Op[]): Promise<OpsResult> {
     const file = await this.read(path);
+    // Checked after the last await before mutating, so a freeze() can't slip in between.
+    while (this.gate && (this.gate.paths === "all" || this.gate.paths.has(path))) await this.gate.open;
     if (!file) return { ok: false, code: "NOT_HOLDER", currentVersion: 0 };
     const lock = this.coveringLock(path, userId);
     if (!lock) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
@@ -137,10 +145,64 @@ export class Workspace {
     file.content = next;
     file.version += 1;
     lock.lastEditAt = this.now();
+    this.editors.set(path, new Set([...(this.editors.get(path) ?? []), userId]));
     const full = this.resolvePath(path)!;
     const write = (this.writes.get(path) ?? Promise.resolve()).then(() => writeFile(full, next, "utf8"));
     this.writes.set(path, write);
     await write;
     return { ok: true, version: file.version };
+  }
+
+  // --- Support for the Git queue ------------------------------------------------------------
+
+  editorsOf(path: string): string[] {
+    return [...(this.editors.get(path) ?? [])];
+  }
+
+  clearEditors(paths: string[]) {
+    paths.forEach((p) => this.editors.delete(p));
+  }
+
+  // Someone other than this user (or this user's agent run) holds a lock covering the path.
+  lockedByOther(path: string, userId: string): Lock | undefined {
+    const l = this.conflict(path, "file", userId);
+    return l ? publicLock(l) : undefined;
+  }
+
+  // Hold edits to `paths` (or everything) until the returned function is called, then wait for
+  // writes already past the gate to reach disk.
+  async freeze(paths: string[] | "all"): Promise<() => void> {
+    let open!: () => void;
+    this.gate = { paths: paths === "all" ? "all" : new Set(paths), open: new Promise<void>((r) => (open = r)) };
+    const pending = paths === "all" ? [...this.writes.values()] : paths.map((p) => this.writes.get(p));
+    await Promise.all(pending);
+    return () => {
+      this.gate = null;
+      open();
+    };
+  }
+
+  // After Git changed a file on disk: load it, bump the version, and return the old text so the
+  // caller can broadcast the change. null when the file no longer exists.
+  async reloadFromDisk(path: string): Promise<{ before: string; after: string; version: number } | null> {
+    const full = this.resolvePath(path);
+    const state = this.files.get(path);
+    let after: string;
+    try {
+      after = await readFile(full!, "utf8");
+    } catch {
+      this.files.delete(path);
+      return null;
+    }
+    if (!state) {
+      this.files.set(path, { content: after, version: 1 });
+      return { before: "", after, version: 1 };
+    }
+    const before = state.content;
+    if (before !== after) {
+      state.content = after;
+      state.version += 1;
+    }
+    return { before, after, version: state.version };
   }
 }

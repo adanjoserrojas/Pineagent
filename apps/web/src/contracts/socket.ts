@@ -39,6 +39,41 @@ export type OpsAck = { ok: true; version: number } | { ok: false; code: "NOT_HOL
 
 export type LockChangeReason = "acquired" | "released" | "expired" | "idle" | "revoked";
 
+// --- Git queue (docs/contracts/GIT_QUEUE.md, draft) ---------------------------------------
+
+export type GitChange = {
+  path: string;
+  status: "M" | "A" | "D";
+  added: number;
+  removed: number;
+  editors: string[]; // userIds whose edits landed since the path's last commit
+  committable: boolean; // for the requesting user
+  reason?: "OTHERS_EDITED" | "LOCKED_BY_OTHER" | "UNATTRIBUTED";
+};
+
+export type GitJob = {
+  id: string;
+  userId: string;
+  name: string;
+  kind: "commit" | "push" | "commit+push";
+  state: "queued" | "running";
+};
+
+export type GitErrorCode =
+  | "NOT_YOURS"
+  | "NOTHING_TO_COMMIT"
+  | "REMOTE_HELD"
+  | "REBASE_CONFLICT"
+  | "PUSH_REJECTED"
+  | "BAD_REQUEST"
+  | "FAILED";
+
+export type GitStatusAck = { ok: true; branch: string; ahead: number; changes: GitChange[]; queue: GitJob[] };
+export type GitCommitAck = { ok: true; jobId: string } | { ok: false; code: "BAD_REQUEST" };
+export type GitResult =
+  | { jobId: string; userId: string; ok: true; sha?: string; pushed: boolean; paths: string[] }
+  | { jobId: string; userId: string; ok: false; code: GitErrorCode; message: string; paths?: string[] };
+
 export interface ClientToServerEvents {
   "room:join": (msg: { wsId: string; branch: string }, ack: (res: RoomJoinAck) => void) => void;
   "presence:update": (msg: { openPath: string | null }) => void;
@@ -47,6 +82,8 @@ export interface ClientToServerEvents {
   "session:heartbeat": (msg: Record<string, never>, ack: (res: HeartbeatAck) => void) => void;
   "file:snapshot": (msg: { path: string }, ack: (res: SnapshotAck) => void) => void;
   "file:ops": (msg: { path: string; baseVersion: number; ops: Op[] }, ack: (res: OpsAck) => void) => void;
+  "git:status": (msg: Record<string, never>, ack: (res: GitStatusAck) => void) => void;
+  "git:commit": (msg: { paths: string[]; message: string; push: boolean }, ack: (res: GitCommitAck) => void) => void;
 }
 
 export interface ServerToClientEvents {
@@ -61,6 +98,8 @@ export interface ServerToClientEvents {
   "lock:changed": (msg: { path: string; kind: Lock["kind"]; lock: Lock | null; reason: LockChangeReason }) => void;
   "file:changed": (msg: { path: string; version: number; ops: Op[]; author: string; source: "editor" | "agent" | "shell" }) => void;
   "tree:changed": (msg: { path: string; change: "add" | "delete" | "rename"; newPath?: string }) => void;
+  "git:queue": (msg: { jobs: GitJob[] }) => void;
+  "git:result": (msg: GitResult) => void;
 }
 
 export const roomName = (wsId: string, branch: string) => `ws:${wsId}:${branch}`;

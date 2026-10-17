@@ -18,9 +18,12 @@ import {
   type Member,
   type ServerToClientEvents,
 } from "../src/contracts/socket";
+import { GitRepo } from "./git";
+import { GitQueue } from "./gitQueue";
 import { Workspace } from "./workspace";
 
 type User = { id: string; name: string; avatarUrl: string | null };
+type Room = { ws: Workspace; repo: GitRepo; queue: GitQueue; remoteDir: string };
 type SocketData = { user: User; room?: string; openPath: string | null };
 type MockSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 
@@ -30,6 +33,7 @@ const ALLOWED_ORIGINS = [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+
 async function listFiles(root: string, dir = root): Promise<string[]> {
   const out: string[] = [];
   for (const e of await readdir(dir, { withFileTypes: true })) {
+    if (e.name === ".git") continue;
     const full = join(dir, e.name);
     if (e.isDirectory()) out.push(...(await listFiles(root, full)));
     else out.push(relative(root, full).split("\\").join("/"));
@@ -92,25 +96,44 @@ export async function startMock({
   idleMs = 600_000,
   sweepMs = 1_000,
 }: MockOptions = {}) {
-  // One Workspace per branch room, each editing its own temp copy of the fixture, so tests never
-  // touch the source tree and branches never share files or locks.
-  const rooms = new Map<string, Promise<Workspace>>();
-  const workspaceFor = (room: string) => {
-    let ws = rooms.get(room);
-    if (!ws) {
-      ws = mkdtemp(join(tmpdir(), "pineagent-mock-")).then(async (root) => {
-        await cp(FIXTURE, root, { recursive: true });
-        return new Workspace(root, { leaseMs, idleMs });
-      });
-      rooms.set(room, ws);
-    }
-    return ws;
-  };
-
   const http = createServer();
   const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(http, {
     cors: { origin: ALLOWED_ORIGINS },
   });
+
+  // One Workspace per branch room, each a real git repo (a temp copy of the fixture) with a local
+  // bare repo standing in for GitHub, so tests never touch the source tree and branches never
+  // share files, locks or Git queues.
+  const rooms = new Map<string, Promise<Room>>();
+  const roomFor = (room: string): Promise<Room> => {
+    let r = rooms.get(room);
+    if (!r) {
+      r = (async () => {
+        const root = await mkdtemp(join(tmpdir(), "pineagent-mock-"));
+        await cp(FIXTURE, root, { recursive: true });
+        const remoteDir = await mkdtemp(join(tmpdir(), "pineagent-remote-"));
+        const repo = await GitRepo.init(root, remoteDir);
+        const ws = new Workspace(root, { leaseMs, idleMs });
+        const queue = new GitQueue(ws, repo, {
+          queue: (jobs) => io.to(room).emit("git:queue", { jobs }),
+          result: (res) => io.to(room).emit("git:result", res),
+          fileChanged: (path, before, after, version) =>
+            io.to(room).emit("file:changed", {
+              path,
+              version,
+              ops: [{ offset: 0, length: before.length, text: after }],
+              author: "git",
+              source: "shell",
+            }),
+          treeChanged: (path, change) => io.to(room).emit("tree:changed", { path, change }),
+        });
+        return { ws, repo, queue, remoteDir };
+      })();
+      rooms.set(room, r);
+    }
+    return r;
+  };
+  const workspaceFor = async (room: string) => (await roomFor(room)).ws;
 
   io.use(async (socket, next) => {
     const user = await authenticate(socket.handshake.auth?.token);
@@ -136,7 +159,7 @@ export async function startMock({
   // Leases end here, never on disconnect: Wi-Fi blips are common, so only silence or idleness frees a lock.
   const sweeper = setInterval(async () => {
     for (const [room, pending] of rooms) {
-      for (const { lock, reason } of (await pending).sweep()) {
+      for (const { lock, reason } of (await pending).ws.sweep()) {
         io.to(room).emit("lock:changed", { path: lock.path, kind: lock.kind, lock: null, reason });
       }
     }
@@ -144,7 +167,7 @@ export async function startMock({
 
   io.on("connection", (socket: MockSocket) => {
     const { user } = socket.data;
-    const joined = async () => (socket.data.room ? { room: socket.data.room, ws: await workspaceFor(socket.data.room) } : null);
+    const joined = async () => (socket.data.room ? { room: socket.data.room, ...(await roomFor(socket.data.room)) } : null);
 
     socket.on("room:join", async ({ wsId, branch }, ack) => {
       if (typeof wsId !== "string" || typeof branch !== "string") return ack({ ok: false, code: "NOT_COLLABORATOR" });
@@ -213,6 +236,20 @@ export async function startMock({
       }
     });
 
+    socket.on("git:status", async (_msg, ack) => {
+      const j = await joined();
+      if (!j) return ack({ ok: true, branch: "main", ahead: 0, changes: [], queue: [] });
+      ack(await j.queue.status(user.id));
+    });
+
+    socket.on("git:commit", async ({ paths, message, push }, ack) => {
+      const j = await joined();
+      // GitHub noreply addresses need the numeric id (SE1); the mock derives one from the name.
+      const author = { id: user.id, name: user.name, email: `${user.name}@users.noreply.github.com` };
+      const jobId = j?.queue.enqueue(author, paths, message, push);
+      ack(jobId ? { ok: true, jobId } : { ok: false, code: "BAD_REQUEST" });
+    });
+
     socket.on("presence:update", ({ openPath }) => {
       const room = socket.data.room;
       if (!room || (openPath !== null && typeof openPath !== "string")) return;
@@ -234,8 +271,9 @@ export async function startMock({
   console.log(`[mock] listening on :${bound}`);
   return {
     port: bound,
-    // Exposed for tests that check what reached disk.
+    // Exposed for tests that check what reached disk and Git.
     workspace: workspaceFor,
+    room: roomFor,
     close: () => {
       clearInterval(sweeper);
       const closed = new Promise<void>((resolve) => io.close(() => resolve()));
