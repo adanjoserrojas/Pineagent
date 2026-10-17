@@ -81,7 +81,8 @@ function inWorkspace(root: string, path: unknown): string | null {
   return full.startsWith(root + sep) ? full : null;
 }
 
-export async function startMock({ port = 3001 }: { port?: number } = {}) {
+// snapshotDelayMs simulates a slow server for tests of the browser's loading states.
+export async function startMock({ port = 3001, snapshotDelayMs = 0 }: { port?: number; snapshotDelayMs?: number } = {}) {
   // Each mock instance edits its own temp copy of the fixture, so tests never touch the source tree.
   const root = await mkdtemp(join(tmpdir(), "pineagent-mock-"));
   await cp(FIXTURE, root, { recursive: true });
@@ -133,6 +134,7 @@ export async function startMock({ port = 3001 }: { port?: number } = {}) {
       const full = socket.data.room ? inWorkspace(root, path) : null;
       if (!full) return ack({ ok: false, code: "NOT_FOUND" });
       try {
+        if (snapshotDelayMs) await new Promise((r) => setTimeout(r, snapshotDelayMs));
         const content = await readFile(full, "utf8");
         const hash = createHash("sha256").update(content).digest("hex");
         ack({ ok: true, path, version: versions.get(path) ?? 1, content, hash });

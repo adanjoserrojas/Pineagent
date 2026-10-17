@@ -129,6 +129,11 @@ button { font: inherit; }
 .editor-body { flex: 1 1 auto; min-height: 320px; position: relative; display: flex; }
 .editor-body > section, .editor-body > div:not(.editor-note) { flex: 1 1 auto; }
 .editor-note { margin: auto; padding: 24px; color: var(--muted); text-align: center; }
+/* Slow loads only: dims the previous file so it isn't mistaken for the one being opened. */
+.editor-loading {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgb(14 20 17 / 0.72); color: var(--muted); z-index: 5;
+}
 .editor-status {
   display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 6px 16px;
   border-top: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12px;
