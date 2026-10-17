@@ -41,6 +41,17 @@ chown pineagent:pineagent /workspaces
 
 # --- Placeholder until the real server is deployed (phase 3) ----------------------------------
 # Answers the load balancer's health check so the infrastructure can be tested on its own.
+# The code lives in its own file: systemd rewrites escapes like \n inside ExecStart= lines.
+mkdir -p /opt/pineagent
+cat > /opt/pineagent/placeholder.js <<'JS'
+require("http")
+  .createServer((req, res) => {
+    const ok = req.url === "/health";
+    res.writeHead(ok ? 200 : 404, { "content-type": "text/plain" });
+    res.end(ok ? "ok (placeholder)\n" : "not found\n");
+  })
+  .listen(3001);
+JS
 cat > /etc/systemd/system/pineagent-placeholder.service <<'UNIT'
 [Unit]
 Description=Pineagent placeholder health endpoint
@@ -48,7 +59,7 @@ After=network-online.target
 
 [Service]
 User=pineagent
-ExecStart=/usr/local/bin/node -e "require('http').createServer((q,s)=>{s.writeHead(q.url==='/health'?200:404,{'content-type':'text/plain'});s.end(q.url==='/health'?'ok (placeholder)\n':'not found\n')}).listen(3001)"
+ExecStart=/usr/local/bin/node /opt/pineagent/placeholder.js
 Restart=always
 
 [Install]
