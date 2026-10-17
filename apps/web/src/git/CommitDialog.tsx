@@ -256,8 +256,7 @@ function Outcome({ result }: { result: GitResult }) {
     const sha = result.sha?.slice(0, 7);
     return (
       <p className="commit-success" role="status">
-        {result.paths.length ? `Committed ${sha}` : "Pushed"}
-        {result.pushed ? " and pushed to the remote." : "."}
+        {!result.paths.length ? "Pushed to the remote." : result.pushed ? `Committed ${sha} and pushed to the remote.` : `Committed ${sha}.`}
       </p>
     );
   }

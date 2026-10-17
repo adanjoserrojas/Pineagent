@@ -125,3 +125,18 @@ test("a push is held when remote changes touch someone else's uncommitted work",
   expect((await lastCommit()).author).toBe("alice");
   await expect(dialog(alice).getByRole("button", { name: "Push 1 commit" })).toBeVisible();
 });
+
+test("a commit kept local can be pushed later on its own", async ({ browser }) => {
+  mock = await startMock({ port: 0 });
+  const alice = await joinAs(browser, "alice");
+  await editFile(alice, "src/auth.ts", "// later\n");
+  await openDialog(alice);
+  await dialog(alice).getByLabel("Commit message").fill("Push me later");
+  await dialog(alice).getByRole("button", { name: "Commit 1 file" }).click();
+  await expect(dialog(alice).getByText(/^Committed [0-9a-f]{7}\.$/)).toBeVisible();
+
+  await dialog(alice).getByRole("button", { name: "Push 1 commit" }).click();
+  await expect(dialog(alice).getByText(/^Pushed to the remote\.$/)).toBeVisible();
+  const remote = new GitRepo((await mock.room(ROOM)).remoteDir);
+  expect((await remote.run(["log", "-1", "--format=%an %s", "main"])).trim()).toBe("alice Push me later");
+});
