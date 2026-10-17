@@ -1,3 +1,4 @@
+import { DEV_TOOLS } from "../devtools";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -19,12 +20,14 @@ export default function EditorPane({
   connected,
   selfId,
   members,
+  onPauseRun,
 }: {
   manager: SessionManager;
   path: string;
   connected: boolean;
   selfId: string | null;
   members: Member[];
+  onPauseRun?: (runId: string) => void;
 }) {
   const requested = manager.get(path);
   const requestedState = useSyncExternalStore(requested.subscribe, requested.getState);
@@ -61,7 +64,7 @@ export default function EditorPane({
     editorRef.current = editor;
     monacoRef.current = monaco;
     // e2e reads the exact buffer through this; Monaco's DOM only renders visible lines.
-    if (import.meta.env.DEV) (window as unknown as { __editorText?: () => string }).__editorText = () => editor.getValue();
+    if (DEV_TOOLS) (window as unknown as { __editorText?: () => string }).__editorText = () => editor.getValue();
     editor.onDidChangeModelContent((e) => {
       if (applyingRemote.current || e.isFlush) return;
       // All offsets in one event refer to the text before the event. Applying from the end of the
@@ -157,6 +160,12 @@ export default function EditorPane({
       {state.status === "readonly" && state.holder && !switching && (
         <div className="holder-strip" role="status">
           <strong>{nameOf(state.holder)}</strong>&nbsp;is editing this file. You’re following along live.
+          {/* LLD 5: pausing your own agent stops it at the next step and gives the file back. */}
+          {state.holder.holderType === "run" && state.holder.holder === selfId && state.holder.runId && onPauseRun && (
+            <button type="button" className="link-btn holder-action" onClick={() => onPauseRun(state.holder!.runId!)}>
+              Pause agent
+            </button>
+          )}
         </div>
       )}
 

@@ -5,6 +5,7 @@ import {
   type RoomJoinAck,
   type ServerToClientEvents,
 } from "../contracts/socket";
+import { applyRunEvent, mergeRuns } from "../runs/runs";
 import type { WorkspaceStore } from "../state/workspace";
 
 export type WorkspaceSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -45,6 +46,9 @@ export function connectWorkspace(opts: {
         tree: res.tree,
         timing: res.timing,
       });
+      // Catch up on runs we missed while away; never replaces a newer snapshot.
+      const { runs } = await socket.timeout(JOIN_TIMEOUT_MS).emitWithAck("run:list", {});
+      store.set({ runs: mergeRuns(store.get().runs, runs) });
     } catch {
       // No ack in time: drop the connection and let the manager retry.
       socket.disconnect().connect();
@@ -59,6 +63,11 @@ export function connectWorkspace(opts: {
     const code = (err as Error & { data?: { code?: string } }).data?.code;
     if (code === UNAUTHENTICATED) store.set({ connection: "unauthenticated" });
     else store.set({ connection: socket.active ? "reconnecting" : "offline" });
+  });
+
+  socket.on("run:event", (e) => {
+    const runs = applyRunEvent(store.get().runs, e);
+    if (runs) store.set({ runs });
   });
 
   socket.on("git:queue", ({ jobs }) => store.set({ gitQueue: jobs }));
@@ -85,9 +94,10 @@ export function connectWorkspace(opts: {
     const prev = members.find((x) => x.userId === m.userId);
     const others = members.filter((x) => x.userId !== m.userId);
     if (m.status === "left") {
-      store.set({ members: others });
+      store.set({ members: others, team: { kind: "team_leave", at: Date.now() } });
       return;
     }
+    if (m.status === "joined" && !prev) store.set({ team: { kind: "team_join", at: Date.now() } });
     const member = {
       userId: m.userId,
       name: m.name,

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import type { GitJob, GitResult, LeaseTiming, Lock, Member } from "../contracts/socket";
+import type { GitJob, GitResult, LeaseTiming, Lock, Member, RunView } from "../contracts/socket";
+import type { TeamEvent } from "../runs/runs";
 
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline" | "unauthenticated" | "forbidden";
 
@@ -12,6 +13,8 @@ export type WorkspaceState = {
   timing: LeaseTiming | null;
   gitQueue: GitJob[];
   lastGitResult: GitResult | null;
+  runs: Map<string, RunView>;
+  team: TeamEvent | null; // last teammate join/leave, for the plant's overlay
 };
 
 const initial: WorkspaceState = {
@@ -23,6 +26,8 @@ const initial: WorkspaceState = {
   timing: null,
   gitQueue: [],
   lastGitResult: null,
+  runs: new Map(),
+  team: null,
 };
 
 // Tiny external store: React reads it through useSyncExternalStore; socket handlers write it.

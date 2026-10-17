@@ -1,3 +1,4 @@
+import { DEV_TOOLS } from "../devtools";
 import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 
@@ -19,7 +20,7 @@ const env = import.meta.env;
 const auth0Configured = Boolean(env.VITE_AUTH0_DOMAIN && env.VITE_AUTH0_CLIENT_ID);
 
 // Dev builds honour ?as=<name> even with Auth0 configured, so one person can test two users.
-const devIdentityRequested = import.meta.env.DEV && new URLSearchParams(window.location.search).has("as");
+const devIdentityRequested = DEV_TOOLS && new URLSearchParams(window.location.search).has("as");
 
 // Auth0 when configured; otherwise a dev identity from ?as=<name> that only the mock server accepts.
 export function AuthGate({ children }: { children: ReactNode }) {

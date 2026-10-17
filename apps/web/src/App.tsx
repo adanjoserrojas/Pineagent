@@ -1,7 +1,9 @@
+import { DEV_TOOLS } from "./devtools";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useSession } from "./auth/AuthGate";
 import { SessionManager } from "./editor/sessions";
 import { CommitDialog } from "./git/CommitDialog";
+import { RunsColumn } from "./runs/RunsColumn";
 import { connectWorkspace, type WorkspaceSocket } from "./net/socket";
 import { createWorkspaceStore, useWorkspace } from "./state/workspace";
 import { FileTree } from "./tree/FileTree";
@@ -19,7 +21,7 @@ function workspaceFromUrl() {
 
 function apiUrl() {
   // ?api= lets e2e tests point a page at their own mock instance; dev builds only.
-  const override = import.meta.env.DEV ? new URLSearchParams(window.location.search).get("api") : null;
+  const override = DEV_TOOLS ? new URLSearchParams(window.location.search).get("api") : null;
   return override ?? import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 }
 
@@ -129,12 +131,14 @@ export function App() {
                 connected={ws.connection === "connected"}
                 selfId={ws.self?.userId ?? null}
                 members={ws.members}
+                onPauseRun={(runId) => socket?.emit("run:pause", { runId }, () => {})}
               />
             </Suspense>
           ) : (
             <p className="editor-note">Select a file to open it.</p>
           )}
         </main>
+        {socket && <RunsColumn ws={ws} socket={socket} branch={branch} />}
       </div>
     </div>
   );

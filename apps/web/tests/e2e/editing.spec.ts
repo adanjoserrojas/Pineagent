@@ -23,7 +23,8 @@ test.afterEach(async () => {
 });
 
 const status = (p: Page) => p.getByTestId("editor-status");
-const editorText = (p: Page) => p.evaluate(() => (window as unknown as { __editorText: () => string }).__editorText());
+// null until Monaco has mounted (e.g. right after a reload), so polls retry instead of throwing.
+const editorText = (p: Page) => p.evaluate(() => (window as unknown as { __editorText?: () => string }).__editorText?.() ?? null);
 const diskText = async () => readFile(join((await mock.workspace(ROOM)).root, PATH), "utf8");
 
 async function openAs(browser: Browser, name: string): Promise<Page> {
@@ -90,7 +91,7 @@ test("F1: continuous typing — the viewer and the disk match the writer byte fo
 
   await expect(status(alice)).toContainText("saved");
   const written = await editorText(alice);
-  expect(written.startsWith(line.repeat(4))).toBe(true);
+  expect(written?.startsWith(line.repeat(4))).toBe(true);
   await expect.poll(() => editorText(bob)).toBe(written);
   await expect.poll(() => diskText()).toBe(written);
 });

@@ -21,8 +21,12 @@ export default defineConfig({
       env: { MOCK_PORT: String(MOCK_PORT), MOCK_AVATARS: "0" },
     },
     {
-      command: `npx vite --port ${WEB_PORT} --strictPort`,
+      // A built bundle, not the dev server: the dev server prepares Monaco (and its 7 MB TypeScript
+      // worker) on demand and can't keep up with several browsers at once. "development" mode
+      // keeps the test hooks (?as=, ?api=, window.__plant, window.__editorText).
+      command: `npx vite build --mode development --outDir dist-e2e --emptyOutDir && npx vite preview --outDir dist-e2e --port ${WEB_PORT} --strictPort`,
       port: WEB_PORT,
+      timeout: 120_000,
       // Environment variables win over .env.local in Vite.
       env: { VITE_API_URL: `http://localhost:${MOCK_PORT}` },
     },
