@@ -42,7 +42,10 @@ export type LockChangeReason = "acquired" | "released" | "expired" | "idle" | "r
 // --- Agent runs (contracts/RUN_EVENTS.md, draft; SE1 owns the run-state machine) -----
 
 export type RunState = "planning" | "routing" | "awaiting_approval" | "blocked" | "executing" | "paused" | "error" | "done";
-export type RouterMode = "jev" | "cache" | "llm";
+// "openai" is the current harness adapter's name for OpenAI Decisions.
+// Jev is a scorer-provider backup, not the coding agent used after a failed DAG.
+export type RouterMode = "openai" | "jev" | "cache" | "llm";
+export type CodingRecovery = "none" | "warm_agent";
 export type RunStep = { tool: string; detail: string; writes: string[] };
 export type RunCandidate = { id: string; score: number; steps: RunStep[] };
 
@@ -53,6 +56,8 @@ export type RunView = {
   task: string;
   state: RunState;
   routerMode: RouterMode | null;
+  // PROPOSED: optional only while the existing mock migrates; real backend emits it.
+  codingRecovery?: CodingRecovery;
   nodeIndex: number;
   seq: number;
   steps: RunStep[];
@@ -73,6 +78,7 @@ export type RunEvent = {
   seq: number;
   state: RunState;
   routerMode: RouterMode | null;
+  codingRecovery?: CodingRecovery;
   nodeIndex: number;
   ts: number;
   run: RunView;
