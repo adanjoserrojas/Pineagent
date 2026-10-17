@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { Lock, Member } from "../contracts/socket";
+import type { LeaseTiming, Lock, Member } from "../contracts/socket";
 
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline" | "unauthenticated" | "forbidden";
 
@@ -9,6 +9,7 @@ export type WorkspaceState = {
   members: Member[];
   locks: Map<string, Lock>;
   tree: string[];
+  timing: LeaseTiming | null;
 };
 
 const initial: WorkspaceState = {
@@ -17,6 +18,7 @@ const initial: WorkspaceState = {
   members: [],
   locks: new Map(),
   tree: [],
+  timing: null,
 };
 
 // Tiny external store: React reads it through useSyncExternalStore; socket handlers write it.

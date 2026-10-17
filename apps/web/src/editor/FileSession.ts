@@ -51,6 +51,7 @@ export class FileSession {
   private gen = 0; // bumped to ignore async results that belong to an older situation
   private newestSeen = 0; // highest version announced while a snapshot was loading
   private leaving = false; // release the lock once everything is flushed
+  private releaseRequested = false; // "Release lock" while staying on the file
   private opened = false; // shown in the editor; closed sessions stay as a cache and don't fetch
   // While recovery compares our version with the server's, sending would race it and could apply
   // a batch twice, so tick() waits.
@@ -106,6 +107,12 @@ export class FileSession {
     this.releaseIfDone();
   }
 
+  // Give the lock back but keep the file open; typing again re-acquires it.
+  release() {
+    this.releaseRequested = true;
+    this.releaseIfDone();
+  }
+
   dismissLost() {
     this.set({ lostText: null });
   }
@@ -118,6 +125,7 @@ export class FileSession {
 
   // The user typed; the editor has already applied `ops` to its buffer.
   localEdit(ops: Op[]) {
+    this.releaseRequested = false;
     const text = applyOps(this.state.text, ops);
     if (text === null) return void this.load(); // editor and session disagree: resync
     switch (this.state.status) {
@@ -338,7 +346,8 @@ export class FileSession {
   }
 
   private releaseIfDone() {
-    if (!this.leaving || this.pending.length || this.inflight) return;
+    if (!(this.leaving || this.releaseRequested) || this.pending.length || this.inflight) return;
+    this.releaseRequested = false;
     if (this.lockState().mine && this.port.connected()) this.port.release(this.path);
   }
 }

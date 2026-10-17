@@ -138,6 +138,31 @@ button { font: inherit; }
   display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 6px 16px;
   border-top: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12px;
 }
+.editor-tab-writing { border-top-color: var(--you); }
+.editor-tab-readonly { border-top-color: var(--other); }
+.status-writing, .status-acquiring { color: var(--you-text); }
+.status-readonly { color: var(--other-text); }
+.holder-strip {
+  display: flex; flex-wrap: wrap; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line);
+  background: #241a0f; color: #f7d2aa; font-size: 13px;
+}
+.lost-banner {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px; margin: 12px 16px; padding: 14px 16px;
+  border: 1px solid #6b4a22; border-radius: 10px; background: #20170d;
+}
+.lost-banner > div:first-child { flex: 1 1 320px; }
+.lost-banner h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: #f7d2aa; }
+.lost-banner p { margin: 0; font-size: 13px; line-height: 20px; color: #c9b39a; }
+.lost-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-warn { height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--other); color: #1a1208; font-weight: 600; cursor: pointer; }
+.held-toast {
+  position: absolute; right: 20px; bottom: 20px; z-index: 6; width: 340px; max-width: calc(100% - 40px);
+  display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #5a3e20; border-radius: 10px;
+  background: #1c150d; box-shadow: 0 12px 32px rgb(0 0 0 / 0.45); font-size: 13px; color: #c9b39a;
+}
+.held-toast strong { color: #f7d2aa; font-weight: 600; }
+.link-btn { border: 0; background: none; color: var(--you-text); font: inherit; font-size: 12px; cursor: pointer; padding: 4px; }
+.link-btn:hover { text-decoration: underline; }
 .btn-secondary { height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); cursor: pointer; }
 
 .center-note { margin: 30vh auto; text-align: center; color: var(--muted); }

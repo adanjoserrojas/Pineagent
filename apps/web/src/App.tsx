@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useSession } from "./auth/AuthGate";
+import { SessionManager } from "./editor/sessions";
 import { connectWorkspace, type WorkspaceSocket } from "./net/socket";
 import { createWorkspaceStore, useWorkspace } from "./state/workspace";
 import { FileTree } from "./tree/FileTree";
@@ -37,6 +38,24 @@ export function App() {
       setSocket(null);
     };
   }, [wsId, branch, session, store]);
+
+  const [manager, setManager] = useState<SessionManager | null>(null);
+  useEffect(() => {
+    if (!socket) return;
+    const m = new SessionManager(socket, store);
+    setManager(m);
+    return () => {
+      m.dispose();
+      setManager(null);
+    };
+  }, [socket, store]);
+
+  // Opening a file starts (or resumes) its session; leaving it flushes edits and releases the lock.
+  useEffect(() => {
+    if (!manager || !openPath) return;
+    manager.open(openPath);
+    return () => manager.leave(openPath);
+  }, [manager, openPath]);
 
   // Presence is re-sent after every (re)join so other people see what this user has open.
   useEffect(() => {
@@ -80,9 +99,15 @@ export function App() {
           />
         </nav>
         <main className="workspace-main">
-          {openPath && socket ? (
+          {openPath && manager ? (
             <Suspense fallback={<p className="editor-note">Starting editor…</p>}>
-              <EditorPane socket={socket} path={openPath} connected={ws.connection === "connected"} />
+              <EditorPane
+                manager={manager}
+                path={openPath}
+                connected={ws.connection === "connected"}
+                selfId={ws.self?.userId ?? null}
+                members={ws.members}
+              />
             </Suspense>
           ) : (
             <p className="editor-note">Select a file to open it.</p>

@@ -43,6 +43,7 @@ export function connectWorkspace(opts: {
         members: res.members,
         locks: new Map(res.locks.map((l) => [l.path, l])),
         tree: res.tree,
+        timing: res.timing,
       });
     } catch {
       // No ack in time: drop the connection and let the manager retry.
@@ -58,6 +59,14 @@ export function connectWorkspace(opts: {
     const code = (err as Error & { data?: { code?: string } }).data?.code;
     if (code === UNAUTHENTICATED) store.set({ connection: "unauthenticated" });
     else store.set({ connection: socket.active ? "reconnecting" : "offline" });
+  });
+
+  // A new Map each time, so subscribers can tell the lock table changed by reference.
+  socket.on("lock:changed", (m) => {
+    const locks = new Map(store.get().locks);
+    if (m.lock) locks.set(m.path, m.lock);
+    else locks.delete(m.path);
+    store.set({ locks });
   });
 
   socket.on("presence:changed", (m) => {

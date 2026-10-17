@@ -34,7 +34,7 @@ test("filters with / and opens the first match with Enter", async ({ page }) => 
   await expect(page.getByRole("tab", { name: "src/routes/users.ts" })).toBeVisible();
 });
 
-test("opening a file loads its contents read-only and switching files swaps them", async ({ page }) => {
+test("opening a file loads its contents and switching files swaps them", async ({ page }) => {
   await page.goto("/?as=alice");
   await row(page, "src/auth.ts").click();
   const code = page.locator(".monaco-editor .view-lines");
@@ -44,11 +44,6 @@ test("opening a file loads its contents read-only and switching files swaps them
   await row(page, "src/db.ts").click();
   await expect(code).toContainText("rows");
   await expect(code).not.toContainText("currentUser");
-
-  // Read-only until locks land: typing must not change the buffer.
-  await code.click();
-  await page.keyboard.type("zzz");
-  await expect(code).not.toContainText("zzz");
 });
 
 test("another person's open file shows their avatar on the row", async ({ page, browser }) => {

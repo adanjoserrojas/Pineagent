@@ -238,7 +238,10 @@ export async function startMock({
     workspace: workspaceFor,
     close: () => {
       clearInterval(sweeper);
-      return new Promise<void>((resolve) => io.close(() => resolve()));
+      const closed = new Promise<void>((resolve) => io.close(() => resolve()));
+      // Don't wait for half-open connections (e.g. a client that went offline) to time out.
+      http.closeAllConnections();
+      return closed;
     },
   };
 }
