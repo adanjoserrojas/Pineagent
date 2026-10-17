@@ -5,3 +5,8 @@ export type * from "./types.js";
 export { MasterTool1Router } from "./master-tool-1.js";
 export type { RouterOptions } from "./master-tool-1.js";
 export { FROZEN_GATE, FROZEN_CODING, FROZEN_HISTORY, createFrozenRouter } from "./frozen-config.js";
+export { executeV7Dag } from "./v7-executor.js";
+export { executeV8Dag, collectV8Recovery, V8_RECOVERY_LIMITS } from "./v8-executor.js";
+export { SandboxToolRuntime } from "./sandbox-tools.js";
+export { routeHistoryPriors, classifyTaskShape, evaluateEvidenceCheckpoint } from "./adaptive-checkpoint.js";
+export { synthesizePatch, createResponse, responseUsage } from "./openai-response-client.js";
