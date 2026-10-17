@@ -26,3 +26,8 @@ output "release_bucket" {
   description = "Where infra/deploy.sh uploads builds."
   value       = aws_s3_bucket.releases.bucket
 }
+
+output "state_tables" {
+  description = "DynamoDB tables for locks and file versions (names go in deploy/production.env)"
+  value       = { for k, t in aws_dynamodb_table.state : k => t.name }
+}

@@ -13,6 +13,7 @@ export type Config = {
   m2m: { clientId: string; keyFile: string } | null; // null = GitHub access not configured yet
   githubApi: string;
   githubClone: string; // clone URL prefix; "https://github.com" in production
+  dynamo: { region: string; locks: string; files: string } | null; // null = locks and versions in memory only
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -42,6 +43,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         : null,
     githubApi: env.GITHUB_API?.trim() || "https://api.github.com",
     githubClone: env.GITHUB_CLONE?.trim() || "https://github.com",
+    dynamo: env.DYNAMODB_LOCKS_TABLE?.trim()
+      ? { region: need("AWS_REGION"), locks: env.DYNAMODB_LOCKS_TABLE.trim(), files: need("DYNAMODB_FILES_TABLE") }
+      : null,
   };
   if (missing.length) throw new Error(`missing configuration: ${missing.join(", ")}`);
   if (!Number.isInteger(config.port) || config.port <= 0) throw new Error("PORT must be a port number");

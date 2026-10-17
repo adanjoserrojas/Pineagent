@@ -11,6 +11,7 @@ import {
   tokenEnv,
   type HarnessFactory,
   type JoinContext,
+  type Store,
   type User,
 } from "@pineagent/core/server";
 import type { Config } from "./config";
@@ -27,15 +28,29 @@ export type AppDeps = {
   authenticate: (token: unknown) => Promise<User | null>;
   github: Pick<GitHubBroker, "access" | "githubToken"> | null; // null = GitHub access not configured
   harness?: HarnessFactory; // SE1's harness, once it exists
+  store?: Store | null; // null = locks and versions are lost on restart
   log: Log;
 };
 
-export function createApp({ config, authenticate, github, harness = noHarness, log }: AppDeps) {
+export function createApp({ config, authenticate, github, harness = noHarness, store = null, log }: AppDeps) {
   const started = Date.now();
+  let storeErrors = 0;
+  const logged: Log = (event, fields) => {
+    if (event === "store.failed") storeErrors++;
+    log(event, fields);
+  };
   const http: Server = createServer((req, res) => {
     if (req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-      res.end(JSON.stringify({ ok: true, sha: config.sha, uptimeS: Math.round((Date.now() - started) / 1000), github: Boolean(github) }));
+      res.end(
+        JSON.stringify({
+          ok: true,
+          sha: config.sha,
+          uptimeS: Math.round((Date.now() - started) / 1000),
+          github: Boolean(github),
+          store: store ? { errors: storeErrors } : null,
+        }),
+      );
       return;
     }
     res.writeHead(404, { "content-type": "text/plain" });
@@ -85,7 +100,8 @@ export function createApp({ config, authenticate, github, harness = noHarness, l
       return { id: u.id, name: u.name, email: id ? `${id}+${u.name}@users.noreply.github.com` : `${u.name}@users.noreply.github.com` };
     },
     harness,
-    log,
+    store: store ?? undefined,
+    log: logged,
   });
 
   return {

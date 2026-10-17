@@ -10,6 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1143.0",
+    "@aws-sdk/lib-dynamodb": "3.1143.0",
     "@pineagent/core": "*",
     "jose": "^6.2.12",
     "socket.io": "^4.8.4"

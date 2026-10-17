@@ -40,7 +40,8 @@ cp "$ROOT/services/api/dist/server.mjs" "$ROOT/services/api/dist/server.mjs.map"
 
 # Only the server's settings go to the server; RELEASE_SHA is how /health proves which build runs.
 {
-  for k in AUTH0_DOMAIN AUTH0_AUDIENCE AUTH0_M2M_CLIENT_ID AUTH0_M2M_KEY_FILE WORKSPACES_ROOT ALLOWED_ORIGINS ALLOWED_REPOS; do
+  for k in AUTH0_DOMAIN AUTH0_AUDIENCE AUTH0_M2M_CLIENT_ID AUTH0_M2M_KEY_FILE WORKSPACES_ROOT ALLOWED_ORIGINS ALLOWED_REPOS \
+    AWS_REGION DYNAMODB_LOCKS_TABLE DYNAMODB_FILES_TABLE; do
     printf '%s=%s\n' "$k" "${!k}"
   done
   printf 'RELEASE_SHA=%s\n' "$SHA"

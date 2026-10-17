@@ -8,7 +8,7 @@ import { createLocalJWKSet, exportJWK, exportPKCS8, generateKeyPair, jwtVerify, 
 import { io as connect, type Socket } from "socket.io-client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ClientToServerEvents, ServerToClientEvents } from "@pineagent/core/contracts";
-import { auth0Verifier, GitRepo, tokenEnv } from "@pineagent/core/server";
+import { auth0Verifier, GitRepo, MemoryStore, tokenEnv, type Store } from "@pineagent/core/server";
 import { createApp } from "../src/app";
 import type { Config } from "../src/config";
 import { GitHubBroker, type Fetch } from "../src/github";
@@ -81,6 +81,7 @@ let ghRoot: string;
 let wsRoot: string;
 let app: ReturnType<typeof createApp>;
 let port: number;
+let boot: (opts: { workspacesRoot: string; store: Store }) => Promise<{ app: ReturnType<typeof createApp>; port: number }>;
 const sockets: Socket[] = [];
 
 beforeAll(async () => {
@@ -111,6 +112,7 @@ beforeAll(async () => {
     m2m: { clientId: M2M_ID, keyFile: "unused" },
     githubApi: "https://api.github.test",
     githubClone: `file://${ghRoot}`,
+    dynamo: null,
   };
   const github = new GitHubBroker({ domain: DOMAIN, clientId: M2M_ID, privateKeyPem: async () => m2mPem, githubApi: config.githubApi, fetch: fakeFetch });
   const profiles: Record<string, string> = Object.fromEntries(people.map((p) => [p.sub, p.login]));
@@ -128,6 +130,11 @@ beforeAll(async () => {
   app = createApp({ config, authenticate, github, log: (e, f) => logs.push({ e, ...f }) });
   await new Promise<void>((resolve) => app.http.listen(0, "127.0.0.1", resolve));
   port = (app.http.address() as { port: number }).port;
+  boot = async ({ workspacesRoot, store }) => {
+    const a = createApp({ config: { ...config, workspacesRoot }, authenticate, github, store, log: () => {} });
+    await new Promise<void>((resolve) => a.http.listen(0, "127.0.0.1", resolve));
+    return { app: a, port: (a.http.address() as { port: number }).port };
+  };
 });
 
 afterAll(async () => {
@@ -140,8 +147,8 @@ beforeAll(() => {
 });
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
-function client(token: string): Client {
-  const s: Client = connect(`http://127.0.0.1:${port}`, { auth: { token }, reconnection: false, forceNew: true, transports: ["websocket"] });
+function client(token: string, at = port): Client {
+  const s: Client = connect(`http://127.0.0.1:${at}`, { auth: { token }, reconnection: false, forceNew: true, transports: ["websocket"] });
   sockets.push(s);
   return s;
 }
@@ -254,6 +261,51 @@ describe("joining a repository", () => {
   it("serves /health with the deployed commit", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/health`);
     expect(await res.json()).toMatchObject({ ok: true, sha: "test-sha", github: true });
+  });
+});
+
+describe("restarting the server", () => {
+  it("keeps locks, file versions and who edited what (store written before each ack)", async () => {
+    const store = new MemoryStore();
+    const root = await mkdtemp(join(tmpdir(), "pineagent-ws-restart-"));
+    const join_ = { wsId: "acme/demo", branch: "main" };
+
+    // First run: Alice locks and edits a file.
+    const first = await boot({ workspacesRoot: root, store });
+    const alice = client(await accessToken(ALICE), first.port);
+    await connected(alice);
+    await alice.emitWithAck("room:join", join_);
+    expect(await alice.emitWithAck("lock:acquire", { path: "src/auth.ts", kind: "file" })).toMatchObject({ ok: true });
+    const snap = await alice.emitWithAck("file:snapshot", { path: "src/auth.ts" });
+    const v1 = snap.ok ? snap.version : 0;
+    expect(await alice.emitWithAck("file:ops", { path: "src/auth.ts", baseVersion: v1, ops: [{ offset: 0, length: 0, text: "// a\n" }] })).toMatchObject({ ok: true, version: v1 + 1 });
+    expect(await alice.emitWithAck("file:ops", { path: "src/auth.ts", baseVersion: v1 + 1, ops: [{ offset: 0, length: 0, text: "// b\n" }] })).toMatchObject({ ok: true, version: v1 + 2 });
+    // Nothing more to wait for: each ack above came after its store write.
+    alice.close();
+    await first.app.close();
+
+    // Second run, same disk and store.
+    const second = await boot({ workspacesRoot: root, store });
+    try {
+      const alice2 = client(await accessToken(ALICE), second.port);
+      await connected(alice2);
+      const joined = await alice2.emitWithAck("room:join", join_);
+      expect(joined.ok && joined.locks).toMatchObject([{ path: "src/auth.ts", holder: ALICE.sub, holderType: "user" }]);
+      // The version carries on, so Alice's editor (at v1+2) keeps typing without a resync.
+      const after = await alice2.emitWithAck("file:snapshot", { path: "src/auth.ts" });
+      expect(after).toMatchObject({ ok: true, version: v1 + 2 });
+      expect(after.ok && after.content.startsWith("// b\n// a\n")).toBe(true);
+      expect(await alice2.emitWithAck("file:ops", { path: "src/auth.ts", baseVersion: v1 + 2, ops: [{ offset: 0, length: 0, text: "// c\n" }] })).toMatchObject({ ok: true, version: v1 + 3 });
+      // The change is still Alice's to commit.
+      const status = await alice2.emitWithAck("git:status", {});
+      expect(status.changes.find((c) => c.path === "src/auth.ts")).toMatchObject({ editors: [ALICE.sub], committable: true });
+
+      // Releasing writes through too: a third start would find no lock.
+      await alice2.emitWithAck("lock:release", { path: "src/auth.ts" });
+      expect((await store.room("ws:acme/demo:main").load()).locks).toEqual([]);
+    } finally {
+      await second.app.close();
+    }
   });
 });
 
