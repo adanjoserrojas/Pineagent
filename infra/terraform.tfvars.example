@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+aws_profile  = "pineagent"            # your profile for the Pineagent AWS account
+region       = "us-east-2"
+budget_email = "you@example.com"      # cost alerts
+budget_usd   = 25
+
+# Phase 2 (HTTPS). Leave empty for phase 1.
+domain_name     = ""                  # e.g. "api.example.com"
+route53_zone_id = ""                  # only if that domain's DNS is in Route 53

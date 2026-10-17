@@ -1,0 +1,10 @@
+# Provider plugins (re-downloaded by `terraform init`).
+.terraform/
+# State: maps this code to real resources and can contain secrets. Never commit.
+*.tfstate
+*.tfstate.*
+# Your values (profile, email, domain).
+terraform.tfvars
+# Saved plans embed state.
+*.tfplan
+crash.log

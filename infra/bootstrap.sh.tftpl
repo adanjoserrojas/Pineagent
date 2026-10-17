@@ -1,0 +1,60 @@
+#!/bin/bash
+# First-boot setup for the Pineagent server (Amazon Linux 2023), run by cloud-init as root.
+# Terraform fills in $${...} placeholders; plain $VAR is bash. Output goes to
+# /var/log/pineagent-bootstrap.log, the first place to look when something is missing.
+set -euo pipefail
+exec > >(tee -a /var/log/pineagent-bootstrap.log) 2>&1
+echo "bootstrap start $(date -Is)"
+
+dnf install -y git docker xz tar
+
+# --- Node.js 22 LTS from nodejs.org, checked against the published SHA-256 ---------------------
+NODE_BASE=https://nodejs.org/dist/latest-v22.x
+cd /tmp
+curl -fsSL "$NODE_BASE/SHASUMS256.txt" -o SHASUMS256.txt
+NODE_TAR=$(awk '/linux-x64\.tar\.xz$/ {print $2}' SHASUMS256.txt)
+curl -fsSLO "$NODE_BASE/$NODE_TAR"
+grep " $NODE_TAR\$" SHASUMS256.txt | sha256sum -c -
+tar -xJf "$NODE_TAR" -C /usr/local --strip-components=1
+node --version
+
+# --- Docker (per-user containers come in phase 4) ---------------------------------------------
+systemctl enable --now docker
+
+# --- The service account: the server runs as this user, never as root -------------------------
+id pineagent >/dev/null 2>&1 || useradd --system --create-home --shell /sbin/nologin pineagent
+
+# --- Data volume at /workspaces ---------------------------------------------------------------
+# Nitro instances show EBS volumes as NVMe disks with unpredictable names (/dev/nvme1n1 ...), so
+# find ours by its volume ID. The attachment can land a little after boot, hence the wait.
+DEV="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${replace(data_volume_id, "-", "")}"
+for _ in $(seq 1 60); do [ -e "$DEV" ] && break; sleep 5; done
+[ -e "$DEV" ] || { echo "data volume never appeared"; exit 1; }
+# Format only a blank disk. On a rebuilt instance the volume already has the repos on it.
+blkid "$DEV" >/dev/null || mkfs.xfs "$DEV"
+UUID=$(blkid -s UUID -o value "$DEV")
+mkdir -p /workspaces
+# nofail: if the volume is ever missing, the machine still boots and you can get in to fix it.
+grep -q "$UUID" /etc/fstab || echo "UUID=$UUID /workspaces xfs defaults,nofail 0 2" >> /etc/fstab
+mount -a
+chown pineagent:pineagent /workspaces
+
+# --- Placeholder until the real server is deployed (phase 3) ----------------------------------
+# Answers the load balancer's health check so the infrastructure can be tested on its own.
+cat > /etc/systemd/system/pineagent-placeholder.service <<'UNIT'
+[Unit]
+Description=Pineagent placeholder health endpoint
+After=network-online.target
+
+[Service]
+User=pineagent
+ExecStart=/usr/local/bin/node -e "require('http').createServer((q,s)=>{s.writeHead(q.url==='/health'?200:404,{'content-type':'text/plain'});s.end(q.url==='/health'?'ok (placeholder)\n':'not found\n')}).listen(3001)"
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now pineagent-placeholder
+
+echo "bootstrap done $(date -Is)"
