@@ -115,6 +115,7 @@ export function App() {
           <FileTree
             paths={ws.tree}
             locks={ws.locks}
+            changes={ws.changes}
             members={ws.members}
             selfId={ws.self?.userId ?? null}
             openPath={openPath}

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { GitJob, GitResult, LeaseTiming, Lock, Member, RunView } from "../contracts/socket";
+import type { FileChange, GitJob, GitResult, LeaseTiming, Lock, Member, RunView } from "../contracts/socket";
 import type { TeamEvent } from "../runs/runs";
 
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline" | "unauthenticated" | "forbidden";
@@ -11,6 +11,7 @@ export type WorkspaceState = {
   locks: Map<string, Lock>;
   tree: string[];
   timing: LeaseTiming | null;
+  changes: Map<string, FileChange["status"]>; // the branch's uncommitted paths, for the explorer
   gitQueue: GitJob[];
   lastGitResult: GitResult | null;
   runs: Map<string, RunView>;
@@ -24,6 +25,7 @@ const initial: WorkspaceState = {
   locks: new Map(),
   tree: [],
   timing: null,
+  changes: new Map(),
   gitQueue: [],
   lastGitResult: null,
   runs: new Map(),

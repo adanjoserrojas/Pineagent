@@ -71,6 +71,7 @@ export function connectWorkspace(opts: {
   });
 
   socket.on("git:queue", ({ jobs }) => store.set({ gitQueue: jobs }));
+  socket.on("git:changes", ({ changes }) => store.set({ changes: new Map(changes.map((c) => [c.path, c.status])) }));
   socket.on("git:result", (result) => store.set({ lastGitResult: result }));
 
   // A rebase can add or delete files under everyone.

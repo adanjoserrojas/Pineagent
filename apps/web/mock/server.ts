@@ -1,5 +1,5 @@
 // Mock of SE1's Socket.IO gateway for browser development and e2e tests.
-// Implements docs/contracts/SOCKET_LOCKS_AND_FILES.md in memory. NOT the real server:
+// Implements contracts/SOCKET_LOCKS_AND_FILES.md in memory. NOT the real server:
 // it accepts `dev:<name>` tokens, which the real API must reject.
 import { createHash } from "node:crypto";
 import { cp, mkdtemp, readdir } from "node:fs/promises";
@@ -18,13 +18,14 @@ import {
   type Member,
   type ServerToClientEvents,
 } from "../src/contracts/socket";
+import { ChangeFeed } from "./gitChanges";
 import { GitRepo } from "./git";
 import { GitQueue } from "./gitQueue";
 import { MockHarness } from "./harness";
 import { Workspace } from "./workspace";
 
 type User = { id: string; name: string; avatarUrl: string | null };
-type Room = { ws: Workspace; repo: GitRepo; queue: GitQueue; harness: MockHarness; remoteDir: string };
+type Room = { ws: Workspace; repo: GitRepo; queue: GitQueue; harness: MockHarness; changes: ChangeFeed; remoteDir: string };
 type SocketData = { user: User; room?: string; openPath: string | null };
 type MockSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 
@@ -66,7 +67,9 @@ async function verifyAuth0(token: string): Promise<User | null> {
   try {
     const { payload } = await jwtVerify(token, jwks, { issuer: `https://${domain}/`, audience });
     const sub = String(payload.sub);
-    const claim = (k: string) => (typeof payload[k] === "string" ? (payload[k] as string) : undefined);
+    // ID tokens carry the profile; API access tokens don't, so ask Auth0 who this is (once per user).
+    const profile = typeof payload.nickname === "string" ? payload : await profileOf(domain, sub, token);
+    const claim = (k: string) => (typeof profile[k] === "string" ? (profile[k] as string) : undefined);
     return {
       id: sub,
       name: claim("nickname") ?? claim("name") ?? sub,
@@ -78,7 +81,26 @@ async function verifyAuth0(token: string): Promise<User | null> {
   }
 }
 
-const presenceOf = (user: User) => ({ userId: user.id, name: user.name, avatarUrl: user.avatarUrl });
+const profiles = new Map<string, Promise<Record<string, unknown>>>();
+
+// Auth0's /userinfo accepts any access token issued with the `openid` scope. A failed lookup isn't
+// cached, and the user still gets in, named by their sub.
+function profileOf(domain: string, sub: string, token: string): Promise<Record<string, unknown>> {
+  let p = profiles.get(sub);
+  if (!p) {
+    p = fetch(`https://${domain}/userinfo`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => (res.ok ? (res.json() as Promise<Record<string, unknown>>) : Promise.reject(new Error(`userinfo ${res.status}`))))
+      .catch((err) => {
+        profiles.delete(sub);
+        console.warn(`[mock] couldn't load the Auth0 profile: ${(err as Error).message}`);
+        return {};
+      });
+    profiles.set(sub, p);
+  }
+  return p;
+}
+
+const presenceOf =(user: User) => ({ userId: user.id, name: user.name, avatarUrl: user.avatarUrl });
 
 export type MockOptions = {
   port?: number;
@@ -117,9 +139,13 @@ export async function startMock({
         const remoteDir = await mkdtemp(join(tmpdir(), "pineagent-remote-"));
         const repo = await GitRepo.init(root, remoteDir);
         const ws = new Workspace(root, { leaseMs, idleMs });
+        const changes = new ChangeFeed(repo, (list) => io.to(room).emit("git:changes", { changes: list }));
         const queue = new GitQueue(ws, repo, {
           queue: (jobs) => io.to(room).emit("git:queue", { jobs }),
-          result: (res) => io.to(room).emit("git:result", res),
+          result: (res) => {
+            io.to(room).emit("git:result", res);
+            changes.poke();
+          },
           fileChanged: (path, before, after, version) =>
             io.to(room).emit("file:changed", {
               path,
@@ -128,7 +154,10 @@ export async function startMock({
               author: "git",
               source: "shell",
             }),
-          treeChanged: (path, change) => io.to(room).emit("tree:changed", { path, change }),
+          treeChanged: (path, change) => {
+            io.to(room).emit("tree:changed", { path, change });
+            changes.poke();
+          },
         });
         const harness = new MockHarness(
           ws,
@@ -137,12 +166,14 @@ export async function startMock({
           {
             run: (e) => io.to(room).emit("run:event", e),
             lockChanged: (path, lock, reason) => io.to(room).emit("lock:changed", { path, kind: "file", lock, reason }),
-            fileChanged: (path, version, ops, author) =>
-              io.to(room).emit("file:changed", { path, version, ops, author, source: "agent" }),
+            fileChanged: (path, version, ops, author) => {
+              io.to(room).emit("file:changed", { path, version, ops, author, source: "agent" });
+              changes.poke();
+            },
           },
           runStepMs,
         );
-        return { ws, repo, queue, harness, remoteDir };
+        return { ws, repo, queue, harness, changes, remoteDir };
       })();
       rooms.set(room, r);
     }
@@ -201,6 +232,7 @@ export async function startMock({
         timing: { heartbeatMs, leaseMs },
       });
       socket.to(room).emit("presence:changed", { ...presenceOf(user), status: "joined", openPath: self.openPath });
+      socket.emit("git:changes", { changes: await (await roomFor(room)).changes.current() });
     });
 
     socket.on("file:snapshot", async ({ path }, ack) => {
@@ -248,6 +280,7 @@ export async function startMock({
       if (res.ok) {
         // Everyone else in the branch, including this user's other tabs (D3: branch-wide).
         socket.to(j.room).emit("file:changed", { path, version: res.version, ops, author: user.id, source: "editor" });
+        j.changes.poke();
       }
     });
 
@@ -318,7 +351,12 @@ export async function startMock({
     room: roomFor,
     close: () => {
       clearInterval(sweeper);
-      for (const r of rooms.values()) void r.then((room) => room.harness.close());
+      for (const r of rooms.values()) {
+        void r.then((room) => {
+          room.harness.close();
+          room.changes.close();
+        });
+      }
       const closed = new Promise<void>((resolve) => io.close(() => resolve()));
       // Don't wait for half-open connections (e.g. a client that went offline) to time out.
       http.closeAllConnections();

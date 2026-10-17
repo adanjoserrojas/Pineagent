@@ -1,4 +1,4 @@
-// Mirror of docs/contracts/SOCKET_LOCKS_AND_FILES.md (draft, not yet frozen).
+// Mirror of contracts/SOCKET_LOCKS_AND_FILES.md (draft, not yet frozen).
 // Fields marked PROPOSED are additions this slice needs; they still need SE1 sign-off.
 
 export type Lock = {
@@ -39,7 +39,7 @@ export type OpsAck = { ok: true; version: number } | { ok: false; code: "NOT_HOL
 
 export type LockChangeReason = "acquired" | "released" | "expired" | "idle" | "revoked";
 
-// --- Agent runs (docs/contracts/RUN_EVENTS.md, draft; SE1 owns the run-state machine) -----
+// --- Agent runs (contracts/RUN_EVENTS.md, draft; SE1 owns the run-state machine) -----
 
 export type RunState = "planning" | "routing" | "awaiting_approval" | "blocked" | "executing" | "paused" | "error" | "done";
 export type RouterMode = "jev" | "cache" | "llm";
@@ -80,7 +80,7 @@ export type RunEvent = {
 
 export type RunActionAck = { ok: true } | { ok: false; code: "NOT_OWNER" | "NOT_WAITING" | "NOT_FOUND" };
 
-// --- Git queue (docs/contracts/GIT_QUEUE.md, draft) ---------------------------------------
+// --- Git queue (contracts/GIT_QUEUE.md, draft) ---------------------------------------
 
 export type GitChange = {
   path: string;
@@ -91,6 +91,10 @@ export type GitChange = {
   committable: boolean; // for the requesting user
   reason?: "OTHERS_EDITED" | "LOCKED_BY_OTHER" | "UNATTRIBUTED";
 };
+
+// PROPOSED: the branch's working-tree status, for everyone (the explorer's letters). Unlike
+// GitChange it says nothing about who may commit, so it's cheap to broadcast.
+export type FileChange = { path: string; status: GitChange["status"] };
 
 export type GitJob = {
   id: string;
@@ -148,6 +152,8 @@ export interface ServerToClientEvents {
   "file:changed": (msg: { path: string; version: number; ops: Op[]; author: string; source: "editor" | "agent" | "shell" }) => void;
   "tree:changed": (msg: { path: string; change: "add" | "delete" | "rename"; newPath?: string }) => void;
   "git:queue": (msg: { jobs: GitJob[] }) => void;
+  // PROPOSED: the full list, to the joining socket after room:join and to the room when it changes.
+  "git:changes": (msg: { changes: FileChange[] }) => void;
   "run:event": (msg: RunEvent) => void;
   "git:result": (msg: GitResult) => void;
 }

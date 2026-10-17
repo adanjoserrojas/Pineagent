@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { Lock, Member } from "../contracts/socket";
+import type { FileChange, Lock, Member } from "../contracts/socket";
 import { Avatar } from "../ui/Avatar";
 import {
   allDirs,
   buildTree,
+  changedDirs,
   coveringDirLock,
   fileTile,
   filterPaths,
@@ -16,6 +17,7 @@ import {
 type Props = {
   paths: string[];
   locks: ReadonlyMap<string, Lock>;
+  changes: ReadonlyMap<string, FileChange["status"]>;
   members: Member[];
   selfId: string | null;
   openPath: string | null;
@@ -23,9 +25,11 @@ type Props = {
   onOpen: (path: string) => void;
 };
 
-type Mode = "all" | "locked";
+type Mode = "all" | "changed" | "locked";
+const MODE_LABEL: Record<Mode, string> = { all: "All", changed: "Changed", locked: "Locked" };
+const CHANGE_LABEL: Record<FileChange["status"], string> = { M: "modified", A: "added", D: "deleted" };
 
-// One focusable row. Filter and "Locked" modes show flat full paths; the default mode is the tree.
+// One focusable row. Filter, "Changed" and "Locked" modes show flat full paths; the default mode is the tree.
 type Item = {
   path: string;
   kind: "file" | "dir";
@@ -37,8 +41,9 @@ type Item = {
 
 const MAX_VIEWERS = 3;
 
-export function FileTree({ paths, locks, members, selfId, openPath, loading, onOpen }: Props) {
+export function FileTree({ paths, locks, changes, members, selfId, openPath, loading, onOpen }: Props) {
   const roots = useMemo(() => buildTree(paths), [paths]);
+  const dirtyDirs = useMemo(() => changedDirs(changes.keys()), [changes]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<Mode>("all");
@@ -50,6 +55,10 @@ export function FileTree({ paths, locks, members, selfId, openPath, loading, onO
   const items: Item[] = useMemo(() => {
     if (query.trim()) {
       return filterPaths(paths, query).map(({ path, start, end }) => flatItem(path, "file", [start, end]));
+    }
+    if (mode === "changed") {
+      // Deleted files aren't in the tree, so this list comes from Git, not from `paths`.
+      return [...changes.keys()].sort().map((p) => flatItem(p, "file"));
     }
     if (mode === "locked") {
       const lockedFiles = paths.filter((p) => isLocked(p, locks));
@@ -63,7 +72,7 @@ export function FileTree({ paths, locks, members, selfId, openPath, loading, onO
       name: node.name,
       depth,
     }));
-  }, [paths, roots, locks, collapsed, query, mode]);
+  }, [paths, roots, locks, changes, collapsed, query, mode]);
 
   const focused = items.some((i) => i.path === focusPath) ? focusPath : (items[0]?.path ?? null);
 
@@ -74,7 +83,11 @@ export function FileTree({ paths, locks, members, selfId, openPath, loading, onO
   }, [focused]);
 
   const viewersOf = (path: string) => members.filter((m) => m.userId !== selfId && m.openPath === path);
-  const lockedCount = paths.filter((p) => isLocked(p, locks)).length;
+  const counts: Record<Mode, number | null> = {
+    all: null,
+    changed: changes.size,
+    locked: paths.filter((p) => isLocked(p, locks)).length,
+  };
   const inTree = !query.trim() && mode === "all";
 
   function toggle(dir: string, open?: boolean) {
@@ -191,7 +204,7 @@ export function FileTree({ paths, locks, members, selfId, openPath, loading, onO
       </label>
 
       <div className="explorer-modes" role="radiogroup" aria-label="Show">
-        {(["all", "locked"] as const).map((m) => (
+        {(["all", "changed", "locked"] as const).map((m) => (
           <button
             key={m}
             type="button"
@@ -200,7 +213,7 @@ export function FileTree({ paths, locks, members, selfId, openPath, loading, onO
             className="mode-btn"
             onClick={() => setMode(m)}
           >
-            {m === "all" ? "All" : `Locked · ${lockedCount}`}
+            {counts[m] === null ? MODE_LABEL[m] : `${MODE_LABEL[m]} · ${counts[m]}`}
           </button>
         ))}
       </div>
@@ -210,7 +223,15 @@ export function FileTree({ paths, locks, members, selfId, openPath, loading, onO
           Loading files…
         </p>
       ) : items.length === 0 ? (
-        <p className="explorer-note">{query.trim() ? "No files match." : mode === "locked" ? "Nothing is locked." : "No files yet."}</p>
+        <p className="explorer-note">
+          {query.trim()
+            ? "No files match."
+            : mode === "locked"
+              ? "Nothing is locked."
+              : mode === "changed"
+                ? "No uncommitted changes on this branch."
+                : "No files yet."}
+        </p>
       ) : (
         <ul role="tree" aria-label="Files" className="tree-list" onKeyDown={onTreeKeyDown}>
           {items.map((item) => {
@@ -221,6 +242,7 @@ export function FileTree({ paths, locks, members, selfId, openPath, loading, onO
             const viewers = item.kind === "file" ? viewersOf(item.path).filter((v) => v.userId !== badgeFace) : [];
             const tile = fileTile(item.name);
             const isDirOpen = item.kind === "dir" && inTree && !collapsed.has(item.path);
+            const change = item.kind === "file" ? changes.get(item.path) : undefined;
             return (
               <li
                 key={item.path}
@@ -251,7 +273,7 @@ export function FileTree({ paths, locks, members, selfId, openPath, loading, onO
                     {tile.label}
                   </span>
                 )}
-                <span className="row-name mono">
+                <span className={change ? `row-name mono git-name-${change}` : "row-name mono"}>
                   {item.prefix && <span className="row-prefix">{item.prefix}</span>}
                   {item.match ? (
                     <>
@@ -273,6 +295,19 @@ export function FileTree({ paths, locks, members, selfId, openPath, loading, onO
                 )}
                 {(lock ?? inherited) && (
                   <LockBadge lock={(lock ?? inherited)!} inherited={!lock} members={members} selfId={selfId} />
+                )}
+                {change ? (
+                  <span className={`git-letter git-${change}`} title={`Uncommitted: ${CHANGE_LABEL[change]}`} data-testid="git-status">
+                    <span aria-hidden="true">{change}</span>
+                    <span className="sr-only">{CHANGE_LABEL[change]}</span>
+                  </span>
+                ) : (
+                  item.kind === "dir" &&
+                  dirtyDirs.has(item.path) && (
+                    <span className="git-dot" title="Contains uncommitted changes" data-testid="git-status">
+                      <span className="sr-only">contains changes</span>
+                    </span>
+                  )
                 )}
               </li>
             );

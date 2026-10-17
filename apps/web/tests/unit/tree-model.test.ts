@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { githubAvatarUrl, type Lock } from "../../src/contracts/socket";
-import { allDirs, buildTree, coveringDirLock, fileTile, filterPaths, isLocked, parentDir, visibleRows } from "../../src/tree/model";
+import { allDirs, buildTree, changedDirs, coveringDirLock, fileTile, filterPaths, isLocked, parentDir, visibleRows } from "../../src/tree/model";
 
 const PATHS = ["README.md", "src/routes/users.ts", "src/auth.ts", "package.json", "src/routes/index.ts", "src/db.ts"];
 
@@ -59,5 +59,12 @@ describe("helpers", () => {
     expect(githubAvatarUrl("github|583231", 32)).toBe("https://avatars.githubusercontent.com/u/583231?s=32");
     expect(githubAvatarUrl("auth0|abc")).toBeNull();
     expect(githubAvatarUrl("dev|alice")).toBeNull();
+  });
+});
+
+describe("changedDirs", () => {
+  it("marks every folder above a changed path, and nothing else", () => {
+    expect([...changedDirs(["src/routes/users.ts", "README.md"])].sort()).toEqual(["src/", "src/routes/"]);
+    expect(changedDirs([]).size).toBe(0);
   });
 });

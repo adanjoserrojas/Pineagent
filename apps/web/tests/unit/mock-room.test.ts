@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { io, type Socket } from "socket.io-client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startMock } from "../../mock/server";
@@ -121,6 +123,43 @@ describe("mock handshake and room:join", () => {
     const released = new Promise((r) => b.once("lock:changed", r));
     await a.emitWithAck("lock:release", { path: "src/auth.ts" });
     expect(await released).toMatchObject({ path: "src/auth.ts", lock: null, reason: "released" });
+  });
+
+  it("tells everyone on the branch which paths are uncommitted (git:changes)", async () => {
+    const a = client("dev:uma");
+    await connected(a);
+    const next = () => new Promise<unknown>((r) => a.once("git:changes", ({ changes }) => r(changes)));
+    let seen = next();
+    await a.emitWithAck("room:join", { wsId: "w7", branch: "main" });
+    expect(await seen).toEqual([]); // sent to the joiner right after the join
+
+    seen = next();
+    await a.emitWithAck("lock:acquire", { path: "src/auth.ts", kind: "file" });
+    await a.emitWithAck("file:ops", { path: "src/auth.ts", baseVersion: 1, ops: [{ offset: 0, length: 0, text: "// x\n" }] });
+    expect(await seen).toEqual([{ path: "src/auth.ts", status: "M" }]);
+
+    // A file that appears in the worktree some other way shows up as added on the next poke.
+    const room = await mock.room("ws:w7:main");
+    await writeFile(join(room.ws.root, "notes.md"), "hi\n");
+    seen = next();
+    room.changes.poke();
+    expect(await seen).toEqual([
+      { path: "notes.md", status: "A" },
+      { path: "src/auth.ts", status: "M" },
+    ]);
+
+    // A late joiner gets the current list.
+    const b = client("dev:vic");
+    await connected(b);
+    const bSeen = new Promise((r) => b.once("git:changes", ({ changes }) => r(changes)));
+    await b.emitWithAck("room:join", { wsId: "w7", branch: "main" });
+    expect(await bSeen).toHaveLength(2);
+
+    // Committing clears the path for everyone.
+    seen = next();
+    await a.emitWithAck("lock:release", { path: "src/auth.ts" });
+    await a.emitWithAck("git:commit", { paths: ["src/auth.ts"], message: "x", push: false });
+    expect(await seen).toEqual([{ path: "notes.md", status: "A" }]);
   });
 
   it("keeps branches in separate rooms", async () => {

@@ -73,6 +73,15 @@ export function coveringDirLock(path: string, locks: ReadonlyMap<string, Lock>):
   return undefined;
 }
 
+// Folders that contain an uncommitted path somewhere below them, for the folder dot.
+export function changedDirs(changed: Iterable<string>): Set<string> {
+  const dirs = new Set<string>();
+  for (const path of changed) {
+    for (let dir = parentDir(path); dir && !dirs.has(dir); dir = parentDir(dir)) dirs.add(dir);
+  }
+  return dirs;
+}
+
 export function isLocked(path: string, locks: ReadonlyMap<string, Lock>): boolean {
   return Boolean(lockOn(path, locks) ?? coveringDirLock(path, locks));
 }

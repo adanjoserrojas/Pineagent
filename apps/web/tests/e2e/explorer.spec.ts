@@ -67,3 +67,35 @@ test("another person's open file shows their avatar on the row", async ({ page, 
   await expect(row(bob, "src/db.ts").getByRole("img", { name: /alice/ })).toHaveCount(1);
   await bob.context().close();
 });
+
+test("uncommitted changes show an M on the file and a dot on its folders, for everyone; Changed lists them", async ({ page, browser }) => {
+  await page.goto(home("alice"));
+  const bob = await (await browser.newContext()).newPage();
+  await bob.goto(home("bob"));
+  await expect(row(bob, "src/auth.ts")).toBeVisible();
+  await expect(bob.getByRole("radio", { name: "Changed · 0" })).toBeVisible();
+
+  await row(page, "src/auth.ts").click();
+  await expect(page.getByTestId("editor-status")).toContainText("Viewing");
+  await page.locator(".monaco-editor .view-line").first().click({ position: { x: 2, y: 5 } });
+  await page.keyboard.type("// hi\n");
+  await expect(page.getByTestId("editor-status")).toContainText("saved");
+
+  await expect(row(bob, "src/auth.ts").getByTestId("git-status")).toHaveText("Mmodified");
+  await expect(row(bob, "src/").getByTestId("git-status")).toBeAttached();
+  await expect(row(bob, "src/routes/").getByTestId("git-status")).toHaveCount(0);
+  await expect(row(bob, "src/db.ts").getByTestId("git-status")).toHaveCount(0);
+
+  await bob.getByRole("radio", { name: "Changed · 1" }).click();
+  await expect(tree(bob).getByRole("treeitem")).toHaveCount(1);
+  await expect(row(bob, "src/auth.ts")).toBeVisible();
+
+  // Once alice commits, the letter goes away for both of them.
+  await page.getByRole("button", { name: "Release lock" }).click();
+  await page.getByRole("button", { name: "Commit…" }).click();
+  await page.getByLabel("Commit message").fill("hi");
+  await page.getByRole("button", { name: "Commit 1 file" }).click();
+  await expect(bob.getByText("No uncommitted changes on this branch.")).toBeVisible();
+  await expect(row(page, "src/auth.ts").getByTestId("git-status")).toHaveCount(0);
+  await bob.context().close();
+});

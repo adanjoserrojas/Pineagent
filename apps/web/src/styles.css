@@ -18,6 +18,7 @@
   --agent-text: #c9b8ff;
   --agent-bg: #2e2550;
   --danger: #ff9ca8;
+  --modified: #e2c08d;
   --sans: "IBM Plex Sans", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
   color-scheme: dark;
@@ -117,6 +118,13 @@ button { font: inherit; }
 .lock-self { background: var(--you-bg); color: var(--you-text); }
 .lock-other { background: var(--other-bg); color: var(--other-text); }
 .lock-agent { background: var(--agent-bg); color: var(--agent-text); padding-left: 5px; }
+/* Uncommitted changes on the branch (git:changes), whoever made them. */
+.git-letter { flex: 0 0 auto; width: 12px; text-align: center; font: 600 11px var(--mono); }
+.git-M, .git-name-M { color: var(--modified); }
+.git-A, .git-name-A { color: var(--action); }
+.git-D, .git-name-D { color: var(--danger); }
+.git-name-D { text-decoration: line-through; }
+.git-dot { flex: 0 0 auto; width: 6px; height: 6px; margin: 0 3px; border-radius: 50%; background: var(--modified); }
 .lock-inherited { background: transparent; border: 1px dashed currentColor; padding-left: 7px; font-weight: 400; }
 .workspace-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; min-height: 60vh; }
 .workspace-main > .editor-note { margin: auto; }
