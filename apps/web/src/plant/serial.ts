@@ -75,7 +75,7 @@ export class PlantSerial {
   ) {
     this.opts = { timeoutMs: 1500, settleMs: 600, loadClip: fetchClip, playLocal, ...opts };
     this.status = serial ? { state: "off" } : { state: "unsupported" };
-    serial?.addEventListener("connect", (e) => void this.replugged(e));
+    serial?.addEventListener("connect", this.onConnect);
   }
 
   subscribe = (fn: () => void) => {
@@ -119,6 +119,12 @@ export class PlantSerial {
     if (!this.serial || this.link) return;
     const [port] = (await this.serial.getPorts()).filter((p) => p.getInfo().usbVendorId === ESPRESSIF);
     if (port) await this.open(port, { quiet: true });
+  }
+
+  // Lets go of the port for good: this instance is being replaced (a dev-server hot update).
+  async release() {
+    this.serial?.removeEventListener("connect", this.onConnect);
+    await this.disconnect();
   }
 
   async disconnect() {
@@ -336,6 +342,8 @@ export class PlantSerial {
     this.set({ state: "off", note: this.port ? "Robot unplugged. Plug it back in and it reconnects." : undefined });
   }
 
+  private readonly onConnect = (e: Event) => void this.replugged(e);
+
   private async replugged(e: Event) {
     const back = ((e as Event & { port?: SerialPortLike }).port ?? e.target) as SerialPortLike;
     const was = this.port;
@@ -423,3 +431,7 @@ function loadPrefs(): PlantPrefs {
 
 const serial = typeof navigator === "undefined" ? undefined : (navigator as Navigator & { serial?: SerialLike }).serial;
 export const plantSerial = new PlantSerial(serial, plantBridge);
+
+// A hot update re-runs this module and makes a new plantSerial. Without this the old one keeps the
+// port and keeps driving the robot with the old code; the new one reopens the port from resume().
+import.meta.hot?.dispose(() => plantSerial.release());
