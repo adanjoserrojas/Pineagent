@@ -3,6 +3,10 @@
   "approval": "Owner requested feature building and production hardening on fix/harness-production; DAG candidates and routing thresholds retained",
   "baseManifestSha256": "e8f5d00e46e94be5cb0fd1691b52c63feb611089cb82528c6665888dc0a56fb8",
   "overrides": {
+    "README.md": {
+      "originalSha256": "2a5d2d87b483b05433e630692f6fc8a3bdd829b9a269ffdd7513cbc6e334df64",
+      "integrationSha256": "8ab18c62e4bcc5673129c90f52b3072b0414dfa8804faf683e90063fdd122106"
+    },
     "src/index.ts": {
       "originalSha256": "b697453a53517e2197bc3961d11473effc0bb49db645f6f55a3a5e9f2fd5f33d",
       "integrationSha256": "68ce0760a8b44480f6e93cbc2dbc7621f84cf7c1ca6e1c811a34fe4fdb4b85e0"
@@ -43,7 +47,9 @@
     "test/structured-patch.test.ts": "cc3294ad2346754db5ab6b9ac5eebbcdfe51cd832fa48821402bf9b88260ee3a",
     "docs/INTEGRATION_REVISION_1.md": "ebed0562bb562ecbc5eb07a0e9439f5b0c610113e438b74edd09bee32c891477",
     "docs/INTEGRATION_REVISION_2.md": "c98090641c325412f607efb3c2c610f08b204a97ddfdf0ef56a1cf3ee437e349",
+    "docs/PRODUCTION_HANDOFF.md": "0c2da2f8dfd71d8db6327d97c8ef5dbc1b8fc650c0313dd256015b53badd5456",
     "docs/PRODUCTION_PLAN.md": "764be092ce3ed669c4345785db7788c7f7c693be1adf9947ffa28bf135f3a839",
-    "scripts/seal-production.mjs": "75cf8183af41349a06048391be259cba41a85a031761bbdf23cb952584375154"
+    "scripts/seal-production.mjs": "75cf8183af41349a06048391be259cba41a85a031761bbdf23cb952584375154",
+    "scripts/verify-linux.sh": "15cac4759cb2364217089741241ddbbc829d7da05e3384518c19d6a644fa539d"
   }
 }

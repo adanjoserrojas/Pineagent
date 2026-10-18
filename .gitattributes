@@ -3,3 +3,4 @@
 firmware/PlantBotTestKit/PlantBotTest/FaceAssets.h linguist-generated
 firmware/PlantBotTestKit/before-*/** linguist-vendored
 firmware/PlantBotTestKit/animations/viewport/rive.js linguist-vendored
+harness/scripts/verify-linux.sh text eol=lf
