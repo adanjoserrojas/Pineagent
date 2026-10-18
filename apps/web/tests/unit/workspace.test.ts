@@ -96,7 +96,13 @@ describe("leases", () => {
 
   it("editing resets the idle clock", async () => {
     ws.acquire("src/auth.ts", "file", ALICE);
-    now += IDLE - 1_000;
+    // Keep the lease live while approaching idle expiry; an expired lease
+    // cannot be resurrected by a late heartbeat after sandbox revocation.
+    for (let elapsed = 0; elapsed < IDLE - 10_000; elapsed += 10_000) {
+      now += 10_000;
+      ws.heartbeat(ALICE);
+    }
+    now += 9_000;
     ws.heartbeat(ALICE);
     await ws.applyOps("src/auth.ts", ALICE, 1, [{ offset: 0, length: 0, text: "// hi\n" }]);
     now += 2_000;

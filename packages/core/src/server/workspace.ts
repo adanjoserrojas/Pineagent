@@ -42,9 +42,53 @@ export class Workspace {
   // Versions from before a restart, used when a file is next loaded.
   private readonly restoredVersions = new Map<string, number>();
   private writeFence: ((path: string) => Promise<void>) | undefined;
+  private leaseFence: (() => Promise<void>) | undefined;
+  private changingLease = false;
+  private freezeTail: Promise<void> = Promise.resolve();
 
   // The sandbox host stops overlapping kernel writers before a backend edit.
   setWriteFence(fence: (path: string) => Promise<void>): void { this.writeFence = fence; }
+
+  // Must stop and verify all writable containers for this room. A failed stop
+  // leaves the old ownership intact; no new owner may inherit live file handles.
+  setLeaseFence(fence: () => Promise<void>): void { this.leaseFence = fence; }
+
+  private assertFenced(): void {
+    if (this.leaseFence && !this.changingLease) throw new Error("Use fenced lock transitions with sandbox protection");
+  }
+
+  private async changeLease<T>(change: () => T): Promise<T> {
+    const release = await this.freeze("all");
+    try {
+      this.changingLease = true;
+      return change();
+    } finally { this.changingLease = false; release(); }
+  }
+
+  async acquireSafely(path: string, kind: Lock["kind"], userId: string): Promise<AcquireResult> {
+    return this.changeLease(() => this.acquire(path, kind, userId));
+  }
+
+  releaseSafely(path: string, userId: string): Promise<Lock | null> {
+    return this.changeLease(() => this.release(path, userId));
+  }
+
+  async sweepSafely(): Promise<{ lock: Lock; reason: LockChangeReason }[]> {
+    if (![...this.locks.values()].some((l) => this.expiryReason(l))) return [];
+    return this.changeLease(() => this.sweep());
+  }
+
+  acquireRunSafely(paths: string[], ownerId: string, runId: string) {
+    return this.changeLease(() => this.acquireForRun(paths, ownerId, runId));
+  }
+
+  releaseRunSafely(runId: string): Promise<Lock[]> {
+    return this.changeLease(() => this.releaseRun(runId));
+  }
+
+  private expiryReason(l: HeldLock): "expired" | "idle" | null {
+    return l.expiresAt <= this.now() ? "expired" : l.holderType === "user" && this.now() - l.lastEditAt >= this.timing.idleMs ? "idle" : null;
+  }
 
   constructor(
     readonly root: string,
@@ -121,6 +165,7 @@ export class Workspace {
   }
 
   acquire(path: string, kind: Lock["kind"], userId: string): AcquireResult {
+    this.assertFenced();
     const target = kind === "dir" && path.endsWith("/") ? path.slice(0, -1) : path;
     if (!this.resolvePath(target) || (kind === "dir" && !path.endsWith("/"))) throw new Error("Noncanonical workspace path");
     const held = this.conflict(path, kind, userId);
@@ -138,6 +183,7 @@ export class Workspace {
   }
 
   release(path: string, userId: string): Lock | null {
+    this.assertFenced();
     const lock = this.locks.get(path);
     if (!lock || lock.holder !== userId || lock.holderType !== "user") return null;
     this.locks.delete(path);
@@ -148,7 +194,7 @@ export class Workspace {
   // Renews every lease the user holds and reports the ones that expired since the last beat.
   heartbeat(userId: string): string[] {
     const expiresAt = this.now() + this.timing.leaseMs;
-    for (const l of this.locks.values()) if (l.holder === userId && l.holderType === "user") l.expiresAt = expiresAt;
+    for (const l of this.locks.values()) if (l.holder === userId && l.holderType === "user" && !this.expiryReason(l)) l.expiresAt = expiresAt;
     const expired = this.expiredFor.get(userId) ?? [];
     this.expiredFor.delete(userId);
     return expired;
@@ -157,10 +203,10 @@ export class Workspace {
   // Drops leases past expiry (no heartbeat) or idle too long (no edits). Agent run leases are
   // kept alive by the harness, which the mock doesn't have, so they only expire.
   sweep(): { lock: Lock; reason: LockChangeReason }[] {
-    const now = this.now();
+    this.assertFenced();
     const dropped: { lock: Lock; reason: LockChangeReason }[] = [];
     for (const [path, l] of this.locks) {
-      const reason = l.expiresAt <= now ? "expired" : l.holderType === "user" && now - l.lastEditAt >= this.timing.idleMs ? "idle" : null;
+      const reason = this.expiryReason(l);
       if (!reason) continue;
       this.locks.delete(path);
       if (l.holderType === "user") void this.save(`lock:${path}`, "deleteLock", (s) => s.deleteLock(path));
@@ -279,6 +325,7 @@ export class Workspace {
   // the run or none is, and the first conflicting lock is returned. The owner's own editor lock
   // conflicts too; their agent waits until they let go of the file.
   acquireForRun(paths: string[], ownerId: string, runId: string): { ok: true; locks: Lock[] } | { ok: false; lock: Lock } {
+    this.assertFenced();
     if (!paths.every((p) => this.resolvePath(p))) throw new Error("Noncanonical workspace path");
     for (const path of paths) {
       for (const l of this.locks.values()) {
@@ -297,6 +344,7 @@ export class Workspace {
   }
 
   releaseRun(runId: string): Lock[] {
+    this.assertFenced();
     const released: Lock[] = [];
     for (const [path, l] of this.locks) {
       if (l.runId !== runId) continue;
@@ -334,14 +382,28 @@ export class Workspace {
   // Hold edits to `paths` (or everything) until the returned function is called, then wait for
   // writes already past the gate to reach disk.
   async freeze(paths: string[] | "all"): Promise<() => void> {
+    // Reserve our turn before yielding. Independent Git/lease freezes must not
+    // overwrite each other's barrier or leave waiting edits stranded forever.
+    const previous = this.freezeTail;
+    let finish!: () => void;
+    this.freezeTail = new Promise<void>((r) => { finish = r; });
+    await previous;
     let open!: () => void;
     this.gate = { paths: paths === "all" ? "all" : new Set(paths), open: new Promise<void>((r) => (open = r)) };
-    const pending = paths === "all" ? [...this.writes.values()] : paths.map((p) => this.writes.get(p));
-    await Promise.all(pending);
-    return () => {
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
       this.gate = null;
       open();
+      finish();
     };
+    try {
+      const pending = paths === "all" ? [...this.writes.values()] : paths.map((p) => this.writes.get(p));
+      await Promise.all(pending);
+      await this.leaseFence?.();
+      return release;
+    } catch (error) { release(); throw error; }
   }
 
   // After Git changed a file on disk: load it, bump the version, and return the old text so the
