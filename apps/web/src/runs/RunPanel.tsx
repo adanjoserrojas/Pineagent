@@ -54,7 +54,7 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
 
   async function start(e: FormEvent) {
     e.preventDefault();
-    if (!task.trim()) return;
+    if (!connected || starting || !task.trim()) return;
     setStarting(true);
     setProblem(null);
     try {
@@ -79,10 +79,22 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
 
   return (
     <aside className="runs" aria-label="Agent runs">
-      <h2 className="section-label">Runs on {branch}</h2>
+      <div className="agent-heading"><h2 className="section-label">Agents</h2><span title={branch}>on {branch}</span></div>
 
       <VirtualPlant face={plant.face} caption={plantCaption} />
-
+      <div className="run-feed">
+        {shown.length === 0 ? (
+          <p className="run-empty">No runs yet. Give your agent a focused task to get growing.</p>
+        ) : (
+          <ul className="run-list" aria-label="Runs">
+            {shown.map((r) => (
+              <li key={r.runId}>
+                <RunCard run={r} mine={r.ownerId === selfId} socket={socket} members={members} nameOf={nameOf} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       <form className="run-form" onSubmit={start}>
         <label htmlFor="run-task">Ask your agent</label>
         <textarea
@@ -109,18 +121,6 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
           </p>
         )}
       </form>
-
-      {shown.length === 0 ? (
-        <p className="run-empty">No runs on this branch yet.</p>
-      ) : (
-        <ul className="run-list" aria-label="Runs">
-          {shown.map((r) => (
-            <li key={r.runId}>
-              <RunCard run={r} mine={r.ownerId === selfId} socket={socket} members={members} nameOf={nameOf} />
-            </li>
-          ))}
-        </ul>
-      )}
     </aside>
   );
 }
@@ -167,7 +167,6 @@ function RunCard({
       <header className="run-head">
         <Avatar name={run.ownerName} url={owner?.avatarUrl ?? null} size={22} />
         <span className="run-owner">{mine ? "Your agent" : `${run.ownerName}’s agent`}</span>
-        <span className="run-id">run {shortId(run.runId)}</span>
         <span className="spacer" />
         <span className="run-chip" style={{ background: chip.background }} data-testid="run-state">
           {STATE_LABEL[run.state]}
@@ -177,6 +176,7 @@ function RunCard({
       <p className="run-task">{run.task}</p>
 
       <div className="run-badges">
+        <span className="run-id mono">run {shortId(run.runId)}</span>
         {run.routerMode && (
           <span className={`run-badge${run.routerMode === "llm" || run.routerMode === "jev" ? " run-badge-warn" : ""}`} data-testid="router-mode">
             {ROUTER_LABEL[run.routerMode]}
@@ -215,7 +215,10 @@ function RunCard({
             const mark = stepMark(run, i);
             return (
               <li key={i} className={`run-step run-step-${mark}`}>
-                <span className="run-step-mark">{mark}</span>
+                <span className="run-step-mark">
+                  <span aria-hidden="true">{mark === "done" ? "✓" : mark === "failed" ? "!" : i + 1}</span>
+                  <span className="sr-only">{mark}</span>
+                </span>
                 <span className="mono">
                   {s.tool} <span className="run-step-detail">{s.detail}</span>
                 </span>
@@ -242,7 +245,7 @@ function RunCard({
               Pause
             </button>
           )}
-          {run.state === "paused" && <span className="run-note">Paused at a step boundary. The file is yours to edit.</span>}
+          {run.state === "paused" && <span className="run-note">Paused at a step boundary. File ownership is shown in the editor.</span>}
         </div>
       )}
       {problem && (

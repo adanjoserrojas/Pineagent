@@ -13,6 +13,7 @@ import { RepoPicker } from "./ui/RepoPicker";
 import { workspaceFromPath } from "./routes";
 import { CrownMark } from "./ui/CrownMark";
 import { WorkspaceIcon } from "./ui/WorkspaceIcon";
+import { BranchActivity } from "./ui/BranchActivity";
 
 // Monaco is most of the bundle; load it only once a file is opened.
 const EditorPane = lazy(() => import("./editor/EditorPane"));
@@ -124,7 +125,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
       <div className="body">
         <nav className="workspace-rail" aria-label="Workspace panels">
           {(["files", "editor", "agents"] as const).map((name) => (
-            <button key={name} type="button" aria-label={name === "files" ? "Show files" : name === "editor" ? "Show editor" : "Show agents"}
+            <button key={name} type="button" title={name[0].toUpperCase() + name.slice(1)} aria-label={name === "files" ? "Show files" : name === "editor" ? "Show editor" : "Show agents"}
               aria-pressed={panel === name} aria-controls={`panel-${name}`} onClick={() => showPanel(name)}>
               <WorkspaceIcon name={name} /><span>{name}</span>
             </button>
@@ -183,6 +184,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
               <button type="button" className="btn-secondary" onClick={() => showPanel("files")}>Browse files</button>
             </div>
           )}
+          <BranchActivity ws={ws} />
         </main>
         <div className="agent-column" id="panel-agents">
           {socket && <RunsColumn ws={ws} socket={socket} branch={branch} />}

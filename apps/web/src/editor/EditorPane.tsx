@@ -1,4 +1,5 @@
 import { DEV_TOOLS } from "../devtools";
+import { WorkspaceIcon } from "../ui/WorkspaceIcon";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -135,6 +136,14 @@ export default function EditorPane({
         </span>
       </div>
 
+      {!switching && EDITABLE.has(state.status) && (
+        <div className={`ownership-ribbon ownership-${state.status}`} role="status">
+          <WorkspaceIcon name="lock" />
+          <strong>{state.status === "writing" ? "You’re editing" : state.status === "acquiring" ? "Claiming the file" : "Ready when you are"}</strong>
+          <span>{!connected ? "Offline · edits will sync after reconnect." : state.status === "writing" ? "Only you can write to this file." : state.status === "acquiring" ? "Waiting for the server to grant ownership." : "Type to request exclusive editing."}</span>
+        </div>
+      )}
+
       {state.lostText !== null && !switching && (
         <section className="lost-banner" role="alert" aria-labelledby="lost-title">
           <div>
@@ -158,7 +167,8 @@ export default function EditorPane({
       )}
 
       {state.status === "readonly" && state.holder && !switching && (
-        <div className="holder-strip" role="status">
+        <div className={`holder-strip ${state.holder.holderType === "run" ? "holder-agent" : ""}`} role="status">
+          <WorkspaceIcon name="lock" />
           <strong>{nameOf(state.holder)}</strong>&nbsp;is editing this file. You’re following along live.
           {/* LLD 5: pausing your own agent stops it at the next step and gives the file back. */}
           {state.holder.holderType === "run" && state.holder.holder === selfId && state.holder.runId && onPauseRun && (
