@@ -71,7 +71,14 @@ export class OpusRun {
   receipts(): ModelReceipt[] { return structuredClone(this.ledger); }
 
   async answer(input: { task: string; evidence: string }, signal?: AbortSignal): Promise<string> {
-    const { value } = await this.generate("answer", input, signal, value => {
+    let protectedTests: string[] = [];
+    try {
+      const sample: unknown = JSON.parse(input.evidence);
+      if (object(sample) && Array.isArray(sample.files)) protectedTests = sample.files
+        .flatMap(file => object(file) && pathOK(file.path) && isAcceptanceTest(file.path) ? [file.path] : []);
+    } catch { /* Non-JSON evidence has no explicit path annotations. */ }
+    const { value } = await this.generate("answer", { ...input, protectedTests,
+      writePolicy: "The listed protectedTests are existing files and cannot be edited, appended to, or replaced, EVEN IN CODE MODE. If asked to add a function or test to one, explain this limitation and suggest a separate NEW test file. Never promise switching to Code will modify a protected test. Implementation belongs in source files; new coverage belongs in new test files." }, signal, value => {
       if (typeof value !== "string" || !value.trim() || value.length > 12000
         || /[\x00-\x08\x0b-\x1f\x7f]/.test(value)) throw new ModelFailure("MODEL_INVALID_ANSWER");
       return value.trim();

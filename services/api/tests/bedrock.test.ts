@@ -3,6 +3,22 @@ import { OpusRun, OPUS_MODEL, type ModelTransport } from "../src/models/bedrock"
 import { contentHash } from "@pineagent/harness";
 
 describe("bounded Opus model gateway", () => {
+  it("gives Ask explicit protected-test boundaries without exposing write tools", async () => {
+    const run = new OpusRun({ runId: "r", ownerId: "alice", transport: async input => {
+      const prompt = JSON.parse(input.messages![0].content![0].text!);
+      expect(prompt.protectedTests).toEqual(["test_app.py"]);
+      expect(prompt.writePolicy).toContain("EVEN IN CODE MODE");
+      expect(input.toolConfig).toBeUndefined();
+      return { $metadata: {}, stream: (async function* () {
+        yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: "Use a new test file; existing tests are protected." } } };
+        yield { messageStop: { stopReason: "end_turn" } };
+      })() };
+    } });
+    await expect(run.answer({ task: "Add a function to test_app.py", evidence: JSON.stringify({ files: [
+      { path: "test_app.py", content: "" }, { path: "app.py", content: "" }, { path: "../test_secret.py", content: "" },
+    ] }) })).resolves.toContain("existing tests are protected");
+    expect(run.receipts()).toHaveLength(1);
+  });
   it("labels existing tests as read-only and accepts separate new coverage", async () => {
     const run = new OpusRun({ runId: "r", ownerId: "alice", transport: async input => {
       const prompt = JSON.parse(input.messages![0].content![0].text!);
