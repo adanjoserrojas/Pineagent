@@ -1,4 +1,4 @@
-import type { HarnessTask, RecoveryLimits, Recovery, RouteDecision, WriteGate, V8ExecutionOptions, ExecutionResult, FileSnapshot } from "./types.js";
+import type { HarnessTask, RecoveryLimits, Recovery, RouteDecision, WriteGate, V8ExecutionOptions, ExecutionResult, FileSnapshot, ToolRuntimeFactory } from "./types.js";
 import path from "node:path";
 import { SandboxToolRuntime } from "./sandbox-tools.js";
 import { routeHistoryPriors } from "./adaptive-checkpoint.js";
@@ -19,14 +19,15 @@ function references(file: string, content: string, available: Set<string>): stri
   return [...new Set(found)];
 }
 
-export async function collectV8Recovery({ trialRoot, task, limits = V8_RECOVERY_LIMITS }: { trialRoot: string; task: HarnessTask; limits?: RecoveryLimits }): Promise<Recovery> {
+export async function collectV8Recovery({ trialRoot, task, limits = V8_RECOVERY_LIMITS, runtimeFactory }: { trialRoot: string; task: HarnessTask; limits?: RecoveryLimits; runtimeFactory?: ToolRuntimeFactory }): Promise<Recovery> {
   for (const name of ["maxFiles", "maxChars", "maxMs"] as const) {
     if (!Number.isInteger(limits[name]) || limits[name] < 1 || limits[name] > V8_RECOVERY_LIMITS[name]) {
       throw new Error(`Invalid recovery limit: ${name}`);
     }
   }
   const started = performance.now();
-  const runtime = new SandboxToolRuntime({ root: trialRoot, allowedWrites: [], outputLimit: limits.maxChars });
+  const runtime = runtimeFactory?.({ root: trialRoot, allowedWrites: [], outputLimit: limits.maxChars })
+    ?? new SandboxToolRuntime({ root: trialRoot, allowedWrites: [], outputLimit: limits.maxChars });
   const allFiles = await runtime.listFiles();
   const available = new Set(allFiles);
   const permitted = (file: string) => file === "package.json" || /^(src|test|tests)\/.+\.(?:[cm]?js|ts|tsx|json)$/.test(file);
@@ -72,7 +73,7 @@ export async function collectV8Recovery({ trialRoot, task, limits = V8_RECOVERY_
 // The router itself and its frozen gate are unchanged. An uncertain choice only
 // authorizes reads; neither synthesis nor a writing fallback is reachable yet.
 export async function executeV8Dag({ trialRoot, task, router, candidates, history, synthesize, fallbackAgent,
-  limits = V8_RECOVERY_LIMITS, afterPatch = null }: V8ExecutionOptions): Promise<{ route: RouteDecision; execution: ExecutionResult }> {
+  limits = V8_RECOVERY_LIMITS, afterPatch = null, runtimeFactory }: V8ExecutionOptions): Promise<{ route: RouteDecision; execution: ExecutionResult }> {
   const started = performance.now();
   const routingDecisions: RouteDecision[] = [];
   const priors = routeHistoryPriors(history, task.prompt);
@@ -83,7 +84,7 @@ export async function executeV8Dag({ trialRoot, task, router, candidates, histor
     routingDecisions, recovery, writeGate, changedPaths: [], modelCalls: 0,
     wallMs: Math.round(performance.now() - started), nodeEvents: recovery?.nodeEvents ?? [] } });
   if (route.status === "awaiting_approval") {
-    recovery = await collectV8Recovery({ trialRoot, task, limits });
+    recovery = await collectV8Recovery({ trialRoot, task, limits, runtimeFactory });
     if (!recovery.sufficient) return pause("recovery_evidence_insufficient");
     route = await router.route({ taskId: `${task.id}:read-only-reassessment`,
       task: `${task.prompt}\nOne bounded read-only discovery pass has completed. Select the best DAG using the observed evidence below. An ambiguous answer will still pause before any write.\n${recovery.packet}`,
@@ -96,7 +97,7 @@ export async function executeV8Dag({ trialRoot, task, router, candidates, histor
   const gateError = new Error("V8 evidence requires approval before synthesis");
   let execution: ExecutionResult;
   try {
-    execution = await executeV7Dag({ trialRoot, task, candidate, history, afterPatch,
+    execution = await executeV7Dag({ trialRoot, task, candidate, history, afterPatch, runtimeFactory,
       fallbackAgent: fallbackAgent ? input => fallbackAgent({ ...input, evidencePacket: recovery
         ? `${input.evidencePacket}\n\nBOUNDED READ-ONLY RECOVERY\n${recovery.packet}` : input.evidencePacket }) : null,
       synthesize: async input => {

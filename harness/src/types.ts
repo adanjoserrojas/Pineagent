@@ -49,6 +49,18 @@ export interface ToolEvent {
   name: string; status: "ok" | "error"; ms: number; input: Record<string, unknown>; error?: string;
 }
 export interface TestResult { exitCode: number | null; output: string }
+/** Integration revision 1: transport seam only; the DAG policy is unchanged. */
+export interface ToolRuntime {
+  outputLimit: number;
+  events: ToolEvent[];
+  listFiles(): Promise<string[]>;
+  searchCode(query: string | string[]): Promise<{ path: string; score: number }[]>;
+  readText(path: string): Promise<string>;
+  readFiles(paths: string[]): Promise<FileSnapshot[]>;
+  writeFiles(files: FileSnapshot[]): Promise<string[]>;
+  runTests(testPath?: string | null): Promise<TestResult>;
+}
+export type ToolRuntimeFactory = (options: { root: string; allowedWrites: string[]; outputLimit: number }) => ToolRuntime;
 export interface Patch {
   files: FileSnapshot[]; usage?: TokenUsage; model?: string; wallMs?: number; summary?: string;
 }
@@ -83,12 +95,14 @@ export interface ExecutionResult {
   routingDecisions?: RouteDecision[]; recovery?: Recovery | null; writeGate?: WriteGate | null;
 }
 export interface DagExecutionOptions {
+  runtimeFactory?: ToolRuntimeFactory;
   trialRoot: string; task: HarnessTask; candidate: DagCandidate; synthesize: Synthesize;
   fallbackAgent?: FallbackAgent | null; history?: RouteHistory; adaptive?: boolean;
   afterPatch?: ((input: { trialRoot: string; patch: Patch; evidence: string }) => Promise<unknown>) | null;
   chooseExpansion?: ((input: { task: HarnessTask; executedRoutes: string[]; unresolved: string[]; options: ExpansionOption[] }) => Promise<RouteDecision>) | null;
 }
 export interface V8ExecutionOptions {
+  runtimeFactory?: ToolRuntimeFactory;
   trialRoot: string; task: HarnessTask & { id: string }; router: Router; candidates: DagCandidate[];
   history?: RouteHistory; synthesize: Synthesize; fallbackAgent?: FallbackAgent;
   limits?: RecoveryLimits; afterPatch?: DagExecutionOptions["afterPatch"];
