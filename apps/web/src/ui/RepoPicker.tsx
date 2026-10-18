@@ -46,6 +46,7 @@ export function RepoPicker() {
           Open
         </button>
       </form>
+      <button type="button" className="btn-secondary" onClick={session.signOut} title={`Log out of Pineagent as ${session.displayName}`}>Log out</button>
     </main>
   );
 }
