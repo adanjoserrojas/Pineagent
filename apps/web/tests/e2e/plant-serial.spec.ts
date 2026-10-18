@@ -89,6 +89,7 @@ test("the robot mirrors the plant's faces, and comes back after an unplug", asyn
     await expect(panel(page).getByRole("status")).toHaveText("Robot connected · Idle");
     expect(await robot(page)).toEqual(["PING", "STATE idle"]);
 
+    await page.getByRole("radio", { name: "Code", exact: true }).check();
     await page.getByLabel("Ask your agent").fill("add a test for currentUser");
     await page.getByRole("button", { name: "Start run" }).click();
     await expect(page.getByTestId("run-state")).toHaveText("done");
