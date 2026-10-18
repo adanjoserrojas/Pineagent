@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { home } from "./rooms";
+import { home, openFile } from "./rooms";
 
 test("Recursive is local, code stays monospaced, and motion honors reduced motion", async ({ page }) => {
   const remoteFonts: string[] = [];
@@ -12,7 +12,7 @@ test("Recursive is local, code stays monospaced, and motion honors reduced motio
   expect(await page.locator(".workspace-welcome .crown-leaves").evaluate((el) => getComputedStyle(el).animationName)).toBe("crown-breathe");
   await page.emulateMedia({ reducedMotion: "reduce" });
   expect(await page.locator(".workspace-welcome .crown-leaves").evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
-  await page.locator('[data-path="src/auth.ts"]').click();
+  await openFile(page, "src/auth.ts");
   await expect(page.locator(".view-lines")).toContainText("currentUser");
   await page.evaluate(() => document.fonts.load("14px 'Recursive Mono'"));
   await expect(page.locator(".monaco-editor .view-lines")).toHaveCSS("font-family", /Recursive Mono/);

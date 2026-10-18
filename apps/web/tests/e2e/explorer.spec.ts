@@ -272,9 +272,16 @@ test("a long file list scrolls inside the explorer instead of stretching the pag
   await expect(row(page, "many/")).not.toBeInViewport();
   await expect(page.getByRole("searchbox", { name: "Filter files" })).toBeInViewport();
 
-  // On a phone the panels stack and the file list keeps its own scroll.
+  // Crown switches mobile panels; the visible explorer keeps its own scroll.
   await page.setViewportSize({ width: 390, height: 800 });
+  await page.getByRole("button", { name: "Show files", exact: true }).click();
   const phone = await sizes();
-  expect(phone.shown).toBeLessThanOrEqual(800 * 0.45 + 1);
+  expect(phone.shown).toBeGreaterThan(0);
+  expect(phone.shown).toBeLessThan(phone.view);
   expect(phone.list).toBeGreaterThan(phone.shown);
+  expect(phone.page).toBeLessThanOrEqual(phone.view);
+  await tree(page).hover();
+  await page.mouse.wheel(0, 5000);
+  await expect(row(page, "README.md")).toBeInViewport();
+  await expect(page.getByRole("searchbox", { name: "Filter files" })).toBeInViewport();
 });

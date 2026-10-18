@@ -41,4 +41,14 @@ describe("editor layout", () => {
     expect(["x.png", "dir/y.JPG", "z.svg", "q.avif"].every(isImagePath)).toBe(true);
     expect(["png", "a.ts", ".png", "dir.png/readme"].some(isImagePath)).toBe(false);
   });
+
+  it("explicit Crown splits share the file and Explorer prefers its focused duplicate", () => {
+    let l = split(openIn(initialLayout, "a.ts"), true);
+    expect(l.groups.map((g) => g.active)).toEqual(["a.ts", "a.ts"]);
+    l = openIn(l, "a.ts");
+    expect(l.focused).toBe(1);
+    expect(l.groups[1].tabs).toEqual(["a.ts"]);
+    l = close(l, 1, "a.ts");
+    expect(l.groups).toEqual([{ tabs: ["a.ts"], active: "a.ts" }]);
+  });
 });

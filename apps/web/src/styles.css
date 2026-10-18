@@ -94,12 +94,12 @@ button { font: inherit; }
 .create-line > svg { margin-top: 4px; }
 .create-field { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .create-input {
-  height: 24px; padding: 0 6px; border: 1px solid var(--you); border-radius: 3px; background: var(--ground);
+  height: 24px; padding: 0 6px; border: 1px solid var(--you); border-radius: 0; background: var(--ground);
   color: var(--text); font: inherit; outline: none;
 }
 .create-input[aria-invalid="true"], .create-input[aria-invalid="true"]:focus { border-color: var(--danger); outline: none; box-shadow: none; }
 .create-error {
-  margin: 0; padding: 4px 6px; border: 1px solid var(--danger); border-top: 0; border-radius: 0 0 3px 3px;
+  margin: 0; padding: 4px 6px; border: 1px solid var(--danger); border-top: 0; border-radius: 0;
   background: #2a1517; color: var(--danger); font-size: 12px; line-height: 1.35;
 }
 
@@ -194,7 +194,7 @@ button { font: inherit; }
 .editor-group-focused .editor-tab-active { border-top-color: var(--action); }
 .tab-label { border: 0; background: none; color: inherit; cursor: pointer; padding: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-close {
-  width: 22px; height: 22px; border: 0; border-radius: 5px; background: none; color: var(--muted);
+  width: 28px; height: 28px; border: 0; border-radius: 0; background: none; color: var(--muted);
   font-size: 16px; line-height: 1; cursor: pointer;
 }
 .tab-close:hover { background: var(--raised); color: var(--text); }
@@ -389,6 +389,43 @@ button:not(:disabled):hover.btn-primary { background: #e4efa9; }
 }
 
 /* Crown shell. Panels stay mounted on small screens so editor sessions survive navigation. */
+/* Top-bar people and commit button */
+.member-chip { position: relative; display: inline-flex; }
+.member-btn { padding: 0; border: 0; background: transparent; border-radius: 0; cursor: pointer; display: inline-flex; }
+.profile-card {
+  position: absolute; top: calc(100% + 12px); right: -8px; z-index: 30; width: 280px; padding: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+  border: 1px solid var(--line); border-radius: 0; background: var(--raised); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.profile-card:focus { outline: none; }
+.profile-head { display: flex; align-items: center; gap: 12px; }
+.profile-id { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.profile-name { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.profile-you { color: var(--muted); font-weight: 400; }
+.profile-link { color: var(--you); font-size: 13px; text-decoration: none; }
+.profile-link:hover { text-decoration: underline; }
+.profile-activity { margin: 0; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.profile-locks { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.profile-locks ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.profile-locks li { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.profile-go { height: 36px; }
+
+.commit-top {
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--muted); cursor: pointer; font-weight: 500;
+}
+.commit-top:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
+.commit-top-primary { background: var(--action); border-color: var(--action); color: var(--on-action); font-weight: 600; }
+.commit-top-primary:hover:not(:disabled) { color: var(--on-action); filter: brightness(1.08); }
+.commit-top:disabled { opacity: 0.5; cursor: not-allowed; }
+.commit-badge {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 0; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--on-action); color: var(--action); font-size: 12px; font-weight: 700;
+}
+.spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 0; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
 .ownership-ribbon { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--raised); color: var(--muted); font-size: 12px; }
 .ownership-ribbon > svg, .holder-strip > svg { flex-shrink: 0; width: 16px; height: 16px; }
 .ownership-ribbon strong { font-weight: 500; color: var(--text); }
@@ -479,7 +516,10 @@ button:not(:disabled):hover.btn-primary { background: #e4efa9; }
 .editor-groups[data-split="right"] { grid-template-columns: minmax(0, var(--split-first)) 6px minmax(0, var(--split-second)); }
 .editor-groups[data-split="down"] { grid-template-rows: minmax(0, var(--split-first)) 6px minmax(0, var(--split-second)); }
 .editor-group-slot { display: contents; }
-.editor-group { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.editor-group, .editor-group-content { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.editor-group-content { flex: 1 1 0; }
+.editor-tabbar { flex-shrink: 0; }
+.editor-group .image-stage { min-height: 40px; }
 .group-toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 3px 8px; border-top: 2px solid transparent; background: var(--panel); color: var(--muted); font: 9px var(--mono); }
 .group-toolbar > span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .group-toolbar button { color: inherit; font: inherit; padding: 5px; min-height: 28px; background: none; border: 0; cursor: pointer; }
@@ -500,7 +540,9 @@ button:not(:disabled):hover.btn-primary { background: #e4efa9; }
 .workspace-rail button span { display: none; }
 .rail-crown { margin-top: auto; width: 18px; color: var(--muted); opacity: 0.5; }
 .crown .tree { display: flex; flex-direction: column; min-width: 0; max-width: none; overflow-y: auto; }
-.crown .explorer { min-height: auto; flex: 1 0 auto; }
+.crown .explorer { min-height: 0; flex: 1 1 0; }
+.crown .tree-list { min-height: 0; max-height: none; overflow-y: auto; }
+.crown .branch-people, .crown .ownership-note { flex-shrink: 0; }
 .crown .explorer-head { padding-top: 16px; }
 .branch-people { padding: 18px; border-top: 1px solid var(--line); }
 .branch-people h2 { display: flex; justify-content: space-between; margin-bottom: 18px; }

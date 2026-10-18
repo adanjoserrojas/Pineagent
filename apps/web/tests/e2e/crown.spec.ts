@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { home } from "./rooms";
+import { home, openFile } from "./rooms";
 import { startMock } from "../../mock/server";
 
 test("Crown keeps square controls and a working desktop workspace", async ({ page }) => {
@@ -9,7 +9,7 @@ test("Crown keeps square controls and a working desktop workspace", async ({ pag
   await expect(page.getByRole("heading", { name: "Good work grows here." })).toBeVisible();
   await page.getByRole("button", { name: "Browse files" }).click();
   await expect(page.getByRole("searchbox", { name: "Filter files" })).toBeFocused();
-  await page.locator('[data-path="src/auth.ts"]').click();
+  await openFile(page, "src/auth.ts");
   await expect(page.getByTestId("editor-status")).toContainText("Viewing");
   await expect(page.getByRole("complementary", { name: "Agent runs" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Branch presence" })).toContainText("Viewing src/auth.ts");
@@ -28,7 +28,7 @@ test("ownership, approval and reduced motion remain clear in Crown", async ({ pa
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(home("alice"));
   await expect(page.getByTestId("connection")).toHaveText("Connected");
-  await page.locator('[data-path="src/auth.ts"]').click();
+  await openFile(page, "src/auth.ts");
   await expect(page.getByTestId("editor-status")).toContainText("Viewing");
   await expect(page.locator(".monaco-editor .view-lines")).toContainText("currentUser");
   await page.locator(".monaco-editor .view-line").first().click({ position: { x: 2, y: 5 } });
@@ -52,7 +52,7 @@ test("small-screen panel navigation preserves the open file and composer draft",
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(home("alice"));
   await expect(page.getByTestId("connection")).toHaveText("Connected");
-  await page.locator('[data-path="src/auth.ts"]').click();
+  await openFile(page, "src/auth.ts");
   await expect(page.getByTestId("editor-status")).toContainText("Viewing");
   await expect(page.getByRole("navigation", { name: "Explorer", exact: true })).toBeHidden();
   await page.getByRole("button", { name: "Show agents" }).click();

@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { home } from "./rooms";
+import { home, openFile } from "./rooms";
 
 async function typeAtStart(group: Locator, text: string) {
   await group.locator(".monaco-editor .view-line").first().click({ position: { x: 2, y: 5 } });
@@ -11,7 +11,7 @@ test("split groups synchronize one file without duplicate edits and retain survi
   await page.setViewportSize({ width: 1800, height: 1100 });
   await page.goto(home("alice"));
   await expect(page.getByTestId("connection")).toHaveText("Connected");
-  await page.locator('[data-path="src/auth.ts"]').click();
+  await openFile(page, "src/auth.ts");
   await expect(page.locator(".view-lines")).toContainText("currentUser");
   await page.keyboard.press("Control+Backslash");
   const first = page.getByRole("region", { name: "Editor group 1", exact: true });
@@ -32,14 +32,14 @@ test("split groups synchronize one file without duplicate edits and retain survi
   try {
     const bob = await context.newPage();
     await bob.goto(home("bob"));
-    await bob.locator('[data-path="src/auth.ts"]').click();
+    await openFile(bob, "src/auth.ts");
     await expect(bob.getByTestId("editor-status")).toContainText("Read-only");
     await expect(bob.locator(".view-lines")).toContainText("// second group");
   } finally { await context.close(); }
 
   await page.getByRole("button", { name: "Focus editor group 2" }).click();
-  await page.locator('[data-path="src/db.ts"]').click();
-  await expect(second.locator(".editor-tab")).toHaveText("src/db.ts");
+  await openFile(page, "src/db.ts");
+  await expect(second.getByRole("tab", { name: "src/db.ts", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(second.getByTestId("editor-status")).toContainText("Viewing");
   await typeAtStart(second, "// db in second group\n");
   await expect(page.locator(".workspace-footer")).toContainText("2 active locks");
@@ -62,7 +62,7 @@ test("split groups synchronize one file without duplicate edits and retain survi
 test("stacked splits resize by keyboard and reflow on narrow screens", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(home("alice"));
-  await page.locator('[data-path="src/auth.ts"]').click();
+  await openFile(page, "src/auth.ts");
   await page.getByRole("button", { name: "Split editor down" }).click();
   const handle = page.getByRole("separator", { name: "Resize editor split" });
   await expect(handle).toHaveAttribute("aria-orientation", "horizontal");

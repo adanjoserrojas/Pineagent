@@ -23,6 +23,7 @@ export default function EditorPane({
   members,
   onPauseRun,
   paneId = "primary",
+  showPathHeader = true,
 }: {
   manager: SessionManager;
   path: string;
@@ -31,6 +32,7 @@ export default function EditorPane({
   members: Member[];
   onPauseRun?: (runId: string) => void;
   paneId?: string;
+  showPathHeader?: boolean;
 }) {
   const lostTitleId = useId();
   const requested = manager.get(path);
@@ -143,11 +145,11 @@ export default function EditorPane({
 
   return (
     <section className="editor" aria-label={`Editor: ${path}`} aria-busy={switching || state.status === "loading"}>
-      <div className="editor-tabs" role="tablist">
+      {showPathHeader && <div className="editor-tabs" role="tablist">
         <span role="tab" aria-selected="true" className={`editor-tab mono editor-tab-${switching ? "loading" : state.status}`}>
           {path}
         </span>
-      </div>
+      </div>}
 
       {!switching && EDITABLE.has(state.status) && (
         <div className={`ownership-ribbon ownership-${state.status}`} role="status">

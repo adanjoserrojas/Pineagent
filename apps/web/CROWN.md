@@ -33,7 +33,7 @@ Unchanged: session/lock protocol, REST and Socket.IO contracts, server/backend, 
 
 The task submission handler also guards offline/pending states for keyboard submission, matching its disabled button.
 
-## Verification
+## Original redesign verification
 
 From the repository root:
 
@@ -64,3 +64,29 @@ Browser verification uses Edge/Chromium with the local mock. Live AWS/Auth0/GitH
 Review the full branch diff and screenshots before merging. No push, deployment or pull request was performed.
 
 Worktree: ../pineagent-redesign on feature/redesign. Another session switched the original checkout during validation; the first theme commit was copied from b98b62e to this branch as 8305993. The other session's branch was not reset or rewritten.
+
+## Merge repair: fix/crown-ui
+
+Requirement/owner: restore the approved Crown workspace after PR #9's merge while retaining newer workspace features; Software Engineer 2 and the project owner review this repair.
+
+Reference: `6d0ddde` (`backup/crown-before-repair` / `redesign/v3`). Repair starts from `9cf06d9`, not by reverting main or overwriting the entire web application.
+
+- Fixed missing React/Avatar imports and disconnected file-creation wiring.
+- Composed the newer tab and image-view components inside Crown's resizable editor groups. Toolbar splits duplicate the focused file using the existing shared FileSession; the tab-bar Split action opens an empty second group. Explorer reveals existing tabs; closing the last tab removes its group.
+- Restored profile-card and commit-button styles with Crown tokens and square edges. Retained ownership, approval, Recursive, animations, panel persistence and responsive collapse behavior.
+- Browser test helpers now handle collapsed folders and mobile panel navigation. No backend, CLI, authentication, shared contract, or hardware files changed.
+
+Unit verification: `npx vitest run --maxWorkers=1` from `apps/web`: 117 passed, four Windows EPERM symlink-fixture failures before assertions. Earlier parallel runs had timing failures; serial verification cleared those. Symlink behavior was not modified or bypassed.
+
+Browser verification: the full 56-test run passed 54 tests. Two legacy mobile assertions expected the pre-Crown stacked-panel layout; updated them to navigate to Files before measuring its scroll area and to check split stacking below Crown's 560px editor-width breakpoint. Both passed in a focused rerun. No application code changed after the full run. All 56 scenarios therefore have passing evidence across these runs (not a single all-green full run).
+
+Commands from `apps/web`, with `PLAYWRIGHT_CHANNEL=msedge`, `E2E_MOCK_PORT=3111`, and `E2E_WEB_PORT=5184`:
+
+```powershell
+npx playwright test --workers=2
+npx playwright test --last-failed --workers=1
+```
+
+Production build/typecheck: `npm run build --workspace apps/web` passed, retaining the Monaco chunk-size warning. `git diff --check` passed. Desktop, phone and split-view screenshots were inspected and saved locally under `.shots/` (ignored).
+
+Review preview: `http://127.0.0.1:5175/ws/crown-repair-review/main?as=adan&api=http://localhost:3112` uses an isolated local mock, not live services. The repair is committed locally only; pushing and merging remain with the project owner after review. The original backend checkout was not modified. Live cloud/auth/device behavior and the future CLI integration remain unverified.
