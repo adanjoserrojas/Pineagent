@@ -1,6 +1,8 @@
 # Frozen V8 harness — TypeScript
 
-Software Engineer 1's bounded Direct DAG runtime for code repair and small function implementation. The owner approved this design freeze and TypeScript transfer. This package is not yet connected to the collaborative workspace and is not a production sandbox.
+Software Engineer 1's bounded Direct DAG runtime. The production revision connects it to the backend workspace authority and builds bounded Node/Python features from requirements, including new modules, existing callers and new acceptance tests. It preserves deterministic DAG execution and the frozen routing thresholds. See [Production handoff](docs/PRODUCTION_HANDOFF.md) for behavior, verification and limits.
+
+The original freeze remains the historical baseline. `INTEGRATION_MANIFEST.json` records explicit production overrides and additions; `FREEZE_MANIFEST.json` is unchanged. The local fixture runtime is not a production sandbox: the backend uses its Docker validator.
 
 ## Layout
 
@@ -37,7 +39,7 @@ This builds ESM JavaScript and declarations under ignored `dist/`; source remain
 
 ## Host composition
 
-The backend supplies the task, an isolated root, metered provider access and an optional owner-container warm fallback. Credentials stay server-side and must never be included in task/evidence/logs. This illustrates core composition, not a completed backend adapter:
+The backend supplies the task, workspace locks and versions, metered provider access and a bounded coding recovery. Credentials stay server-side and must never be included in task/evidence/logs. The live adapter is `services/api/src/harness/controller.ts`; the following is the historical standalone composition example:
 
 ```typescript
 import {
@@ -68,6 +70,6 @@ async function runIsolatedTask(input: {
 }
 ```
 
-Use the frozen factories for the demo. The low-level configurable clients retain their historical defaults and are not the frozen demo configuration. Construct a router per run; do not update history from current task results. The host must meter both provider routes, synthesis and fallback; auto-reload is not a spending guard.
+The backend retains the frozen router factory and uses its existing Bedrock coding model. The standalone frozen synthesis factory above is the reference configuration. Construct a router per run; do not update history from current task results. The host must meter planning, both provider routes, synthesis and recovery; auto-reload is not a spending guard.
 
 See [Frozen design](docs/FROZEN_DESIGN.md), [Backend integration](docs/BACKEND_INTEGRATION.md) and [Verification/handoff](docs/VERIFICATION.md). Shared backend/browser contracts remain outside this package.

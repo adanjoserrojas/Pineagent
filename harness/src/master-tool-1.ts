@@ -1,4 +1,5 @@
-import type { DagCandidate, FetchLike, ProviderMode, RouteDecision, RouteRequest, TokenUsage } from "./types.js";
+import type { DagCandidate, FetchLike, ProviderMode, RouteDecision, RouteRequest, TokenUsage, RouterReceipt } from "./types.js";
+import { setTimeout as delay } from "node:timers/promises";
 type RouterFailure = Error & { status?: number; retryAfter?: string | null };
 type Probabilities = Record<string, number> | { value: string; probability: number }[];
 interface Answer { type?: string; name?: string; choice?: string; confidence?: number; probabilities?: Probabilities }
@@ -46,22 +47,31 @@ function normalizeProbabilities(probabilities: Probabilities | undefined, labels
   const entries = Array.isArray(probabilities)
     ? probabilities
     : Object.entries(probabilities ?? {}).map(([value, probability]) => ({ value, probability }));
+  const seen = new Set<string>();
   for (const item of entries) {
-    if (typeof item?.value === "string" && Object.hasOwn(labels, item.value)) {
-      const probability = Number(item.probability);
-      vector[item.value] = Number.isFinite(probability) ? probability : null;
-    }
+    if (typeof item?.value !== "string" || !Object.hasOwn(labels, item.value) || seen.has(item.value)
+      || typeof item.probability !== "number" || !Number.isFinite(item.probability)
+      || item.probability < 0 || item.probability > 1) return Object.fromEntries(Object.keys(labels).map(label => [label, null]));
+    seen.add(item.value);
+    vector[item.value] = item.probability;
   }
+  // Incomplete or unnormalised scores cannot authorize a write. Tolerate provider rounding.
+  if (seen.size !== Object.keys(labels).length || Math.abs(Object.values(vector).reduce<number>((sum, value) => sum + (value ?? 0), 0) - 1) > 0.01)
+    return Object.fromEntries(Object.keys(labels).map(label => [label, null]));
   return vector;
 }
 
-function probabilityMargin(vector: Record<string, number | null>): number | null {
+function probabilityMargin(vector: Record<string, number | null>, selected: string, confidence: number): number | null {
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1 || Object.values(vector).some(value => value === null)) return null;
   const values = Object.values(vector).filter((value): value is number => Number.isFinite(value)).sort((a, b) => b - a);
-  return values.length >= 2 ? values[0] - values[1] : null;
+  return values.length >= 2 && vector[selected] === values[0] ? values[0] - values[1] : null;
 }
 
-async function postJson<T>(url: string, body: unknown, apiKey: string | undefined, timeoutMs: number, fetchImpl: FetchLike): Promise<{ json: T; clientMs: number }> {
+async function postJson<T>(url: string, body: unknown, apiKey: string | undefined, timeoutMs: number, fetchImpl: FetchLike, signal?: AbortSignal): Promise<{ json: T; clientMs: number }> {
+  signal?.throwIfAborted();
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const started = performance.now();
   try {
@@ -84,10 +94,13 @@ async function postJson<T>(url: string, body: unknown, apiKey: string | undefine
     return { json: JSON.parse(text) as T, clientMs: Math.round(performance.now() - started) };
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
   }
 }
 
 export class MasterTool1Router {
+  private readonly ledger: RouterReceipt[] = [];
+  receipts(): RouterReceipt[] { return structuredClone(this.ledger); }
   mode: RouterOptions["mode"];
   apiKey: string | undefined;
   fetchImpl: FetchLike;
@@ -137,7 +150,8 @@ export class MasterTool1Router {
     return this.now() - this.openedAt >= this.breakerOpenMs ? "half_open" : "open";
   }
 
-  async route({ taskId, task, candidates, oracleCandidateId, historyPriors = {} }: RouteRequest): Promise<RouteDecision> {
+  async route({ taskId, task, candidates, oracleCandidateId, historyPriors = {}, signal }: RouteRequest): Promise<RouteDecision> {
+    signal?.throwIfAborted();
     if (!Array.isArray(candidates) || candidates.length === 0) {
       throw new Error("Master-1 requires at least one candidate");
     }
@@ -159,7 +173,8 @@ export class MasterTool1Router {
     const cacheKey = stableId({ mode: this.mode, secondaryMode: this.secondaryProvider?.mode, task, historyPriors, candidates: candidates.map((c) => c.id) });
     const cached = this.cache.get(cacheKey);
     if (cached && cached.expiresAt > this.now()) {
-      return { ...cached.value, routerMode: "cache", reasonCode: `${this.mode}-cache-hit`, routerCalls: 0 };
+      return { ...cached.value, taskId, routerMode: "cache", reasonCode: `${this.mode}-cache-hit`, routerCalls: 0,
+        routerMs: 0, usage: { inputTokens: 0, outputTokens: 0 } };
     }
 
     if (this.breakerState === "open") return this.useFallback({ taskId, task, candidates }, "breaker-open");
@@ -171,7 +186,7 @@ export class MasterTool1Router {
       if (this.calls >= this.maxCalls) return this.useFallback({ taskId, task, candidates }, "call-budget-exhausted");
       this.calls += 1;
       try {
-        const result = await this.callProvider({ mode: this.mode, apiKey: this.apiKey, task, candidates, historyPriors });
+        const result = await this.measuredProvider({ mode: this.mode, apiKey: this.apiKey, task, candidates, historyPriors, signal });
         this.consecutiveFailures = 0;
         this.openedAt = null;
         const value: RouteDecision = {
@@ -195,11 +210,13 @@ export class MasterTool1Router {
         this.cache.set(cacheKey, { value, expiresAt: this.now() + this.cacheTtlMs });
         return value;
       } catch (caught) {
+        signal?.throwIfAborted();
         const error = caught as RouterFailure;
         lastError = error;
         if (attempt < this.retryCount) {
           const retryAfterMs = Number(error.retryAfter) * 1_000;
-          await sleep(Number.isFinite(retryAfterMs) && retryAfterMs > 0 ? retryAfterMs : 100 + Math.floor(Math.random() * 150));
+          const waitMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0 ? Math.min(retryAfterMs, 3000) : 100 + Math.floor(Math.random() * 150);
+          if (signal) await delay(waitMs, undefined, { signal }); else await sleep(waitMs);
         }
       }
     }
@@ -207,13 +224,14 @@ export class MasterTool1Router {
     if (this.secondaryProvider && isAvailabilityError(lastError) && this.calls < this.maxCalls) {
       this.calls += 1;
       try {
-        const result = await this.callProvider({
+        const result = await this.measuredProvider({
           mode: this.secondaryProvider.mode,
           apiKey: this.secondaryProvider.apiKey,
           timeoutMs: this.secondaryProvider.timeoutMs ?? this.timeoutMs,
           task,
           candidates,
           historyPriors,
+          signal,
         });
         this.consecutiveFailures = 0;
         this.openedAt = null;
@@ -241,6 +259,7 @@ export class MasterTool1Router {
         this.cache.set(cacheKey, { value, expiresAt: this.now() + this.cacheTtlMs });
         return value;
       } catch (caught) {
+        signal?.throwIfAborted();
         const error = caught as RouterFailure;
         lastError = error;
       }
@@ -254,7 +273,14 @@ export class MasterTool1Router {
     );
   }
 
-  async callProvider({ mode = this.mode, apiKey = this.apiKey, timeoutMs = this.timeoutMs, task, candidates, historyPriors = {} }: { mode?: RouterOptions['mode']; apiKey?: string; timeoutMs?: number; task: string; candidates: DagCandidate[]; historyPriors?: Record<string, number> }): Promise<ProviderChoice> {
+  private async measuredProvider(input: Parameters<MasterTool1Router["callProvider"]>[0]): Promise<ProviderChoice> {
+    const start = performance.now();
+    const receipt: RouterReceipt = { provider: (input.mode ?? this.mode) as ProviderMode, status: "failed", usage: null, wallMs: 0 };
+    try { const result = await this.callProvider(input); receipt.status = "ok"; receipt.usage = result.usage; return result; }
+    finally { receipt.wallMs = Math.round(performance.now() - start); this.ledger.push(receipt); }
+  }
+
+  async callProvider({ mode = this.mode, apiKey = this.apiKey, timeoutMs = this.timeoutMs, task, candidates, historyPriors = {}, signal }: { mode?: RouterOptions['mode']; apiKey?: string; timeoutMs?: number; task: string; candidates: DagCandidate[]; historyPriors?: Record<string, number>; signal?: AbortSignal }): Promise<ProviderChoice> {
     const labels = Object.fromEntries(candidates.map((candidate) => [candidate.routeLabel, candidate]));
     const taskState = [
       `Coding task: ${task}`,
@@ -283,6 +309,7 @@ export class MasterTool1Router {
         apiKey,
         timeoutMs,
         this.fetchImpl,
+        signal,
       );
       const answer = response.json.answers?.route;
       const candidate = labels[answer?.choice as string];
@@ -293,7 +320,7 @@ export class MasterTool1Router {
         candidateId: candidate.id,
         confidence: Number(answer!.confidence ?? 0),
         probabilities,
-        probabilityMargin: probabilityMargin(probabilities),
+        probabilityMargin: probabilityMargin(probabilities, answer!.choice!, Number(answer!.confidence ?? 0)),
         routerMs: Number(response.json.latency_ms ?? response.clientMs),
         usage: {
           inputTokens: response.json.usage?.input_tokens ?? null,
@@ -326,6 +353,7 @@ export class MasterTool1Router {
         apiKey,
         timeoutMs,
         this.fetchImpl,
+        signal,
       );
       const answer = response.json.answers?.find((item) => item.name === "route") ?? response.json.answers?.[0];
       const candidate = labels[answer?.choice as string];
@@ -337,7 +365,7 @@ export class MasterTool1Router {
         candidateId: candidate.id,
         confidence: Number(answer!.confidence ?? 0),
         probabilities,
-        probabilityMargin: probabilityMargin(probabilities),
+        probabilityMargin: probabilityMargin(probabilities, answer!.choice!, Number(answer!.confidence ?? 0)),
         routerMs: response.clientMs,
         usage: {
           inputTokens: response.json.usage?.input_tokens ?? null,

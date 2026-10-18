@@ -1,28 +1,55 @@
 {
-  "revision": "V8-python-language-2",
-  "approval": "Owner approved Python adapter for My_App with frozen routing policy and Crown preserved",
+  "revision": "V8-production-3",
+  "approval": "Owner requested feature building and production hardening on fix/harness-production; DAG candidates and routing thresholds retained",
   "baseManifestSha256": "e8f5d00e46e94be5cb0fd1691b52c63feb611089cb82528c6665888dc0a56fb8",
   "overrides": {
+    "README.md": {
+      "originalSha256": "2a5d2d87b483b05433e630692f6fc8a3bdd829b9a269ffdd7513cbc6e334df64",
+      "integrationSha256": "8ab18c62e4bcc5673129c90f52b3072b0414dfa8804faf683e90063fdd122106"
+    },
+    "src/index.ts": {
+      "originalSha256": "b697453a53517e2197bc3961d11473effc0bb49db645f6f55a3a5e9f2fd5f33d",
+      "integrationSha256": "68ce0760a8b44480f6e93cbc2dbc7621f84cf7c1ca6e1c811a34fe4fdb4b85e0"
+    },
+    "src/master-tool-1.ts": {
+      "originalSha256": "f2a5b9cbdfae66a2f907fea97f2d2d18f8ad467c33a2f64828273e3874f370c2",
+      "integrationSha256": "fbd283324e76e599cc39d0728a67dd95170a6f3dce92bf7922cf899cc7e44713"
+    },
+    "src/sandbox-tools.ts": {
+      "originalSha256": "6495d039b9b615d7ab3bf1b2bb3a3518d9c402e67d4fc16b3f6b0467458b60a9",
+      "integrationSha256": "e7369720f3376429471892877206ba4a4b18a9325ede7da619e8fe4ec7db55d5"
+    },
     "src/types.ts": {
       "originalSha256": "13879d7bbf43aad072eca088f389160e27478e3c91bfe32535b66ee6d20ed2c6",
-      "integrationSha256": "0d636a8d7af98bec8bb42ccc297aa0836820259b77c85208abc68782e6c35ae5"
+      "integrationSha256": "a951540c5cd6dc1fd84d79c38937f86b900939215906860d3d54101c10c2e768"
     },
     "src/v7-executor.ts": {
       "originalSha256": "8337297ca1386727e0d8e5bc246cce3974822eae979e5b624aab08c81b2b902f",
-      "integrationSha256": "001376159e72c51764463e6236f8a91f6fbf6852f5e7b5825a1c8cdb65e258b4"
+      "integrationSha256": "b4f45f5a8b89dbc45d7b5402c99bcae893bf710e2023dc4b3def6659a53a9071"
     },
     "src/v8-executor.ts": {
       "originalSha256": "e819eb533163860f229211e854c7fb7d27c4cf53e19413e7b87a705e4b853778",
-      "integrationSha256": "dc0d4ab5d5ce3ac8f392363af3258e7c90de4a9e7e2f147e6c7f0750ac5d00b3"
+      "integrationSha256": "d9d5af461952649069a191ead6c3ab537d55cf9dce5dccec7bd0c8df7494960f"
     },
     "test/freeze-manifest.check.ts": {
       "originalSha256": "130c060ddbc42047ace5b9d5ae65d5eff1a5cebd1d0dcc758628ba4d23b78817",
-      "integrationSha256": "25eecdb977421207763eb8de3d2c89d7ae9b3911a264c87e9989c1ae919fae5a"
+      "integrationSha256": "72611a7bf420da6f47cf31019120183a7167ade0495eb8840e5a9fa9e776a7cf"
     }
   },
   "additions": {
+    "src/evidence-runtime.ts": "a2f79efda77f5e75c95caa0868feeee178a1a05d18ccd0f0d7013eb62cf4e6a0",
+    "src/repository-language.ts": "080328ebb5911d95a363f0b71a09e0d2f24406f2dcdecc83121846d713accff4",
+    "src/structured-patch.ts": "3821d47b7a0f6fe23ffa5f855fae01f9af7af4cac185b20e153706765ca9c1b2",
     "test/backend-runtime.test.ts": "8c2aa62bd607838ba77bab486c98eb94ccba0fb81a188fc3be95e3eaf8b7e3db",
+    "test/execution-limits.test.ts": "7695c56f582cc5312fb460a48d7114237d6048f796d933cb3e2c072eff745024",
+    "test/production-evidence.test.ts": "fa18a7295d461d55e33100b0149d9c5e30995946cb4fcfb9b31c70fb3372cffc",
+    "test/router-validation.test.ts": "44d225644baad5ed80bb1819d71c7219f10bb29d6fc3b74df872a65714aa5ce1",
+    "test/structured-patch.test.ts": "cc3294ad2346754db5ab6b9ac5eebbcdfe51cd832fa48821402bf9b88260ee3a",
     "docs/INTEGRATION_REVISION_1.md": "ebed0562bb562ecbc5eb07a0e9439f5b0c610113e438b74edd09bee32c891477",
-    "docs/INTEGRATION_REVISION_2.md": "c98090641c325412f607efb3c2c610f08b204a97ddfdf0ef56a1cf3ee437e349"
+    "docs/INTEGRATION_REVISION_2.md": "c98090641c325412f607efb3c2c610f08b204a97ddfdf0ef56a1cf3ee437e349",
+    "docs/PRODUCTION_HANDOFF.md": "4e1e7209fcb0c43df31e8290df2d235064632b8027b179504ceeecc85d7ff0c9",
+    "docs/PRODUCTION_PLAN.md": "764be092ce3ed669c4345785db7788c7f7c693be1adf9947ffa28bf135f3a839",
+    "scripts/seal-production.mjs": "75cf8183af41349a06048391be259cba41a85a031761bbdf23cb952584375154",
+    "scripts/verify-linux.sh": "15cac4759cb2364217089741241ddbbc829d7da05e3384518c19d6a644fa539d"
   }
 }

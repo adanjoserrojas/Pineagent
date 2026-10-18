@@ -8,6 +8,22 @@ import { SandboxHost } from "../src/sandbox/host";
 import { BackendTools } from "../src/harness/tools";
 import { executeV8Dag, selectCandidateDags, prototypeTools } from "@pineagent/harness";
 
+it("cancellation stops verification before releasing the workspace barrier", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pineagent-cancel-test-"));
+  const ws = new Workspace(root, { leaseMs: 30000, idleMs: 600000 });
+  let started!: () => void;
+  const running = new Promise<void>(resolve => { started = resolve; });
+  let stopped = 0;
+  const runner = new RoomSandbox(ws, { quiesce: async () => { stopped++; }, ensure: async () => "generation",
+    execute: async () => { started(); return new Promise(() => {}); } });
+  const controller = new AbortController();
+  const verification = runner.runTests("alice", "cancel", null, "node", controller.signal);
+  const rejected = expect(verification).rejects.toThrow("cancelled");
+  await running; controller.abort(); await rejected;
+  expect(stopped).toBeGreaterThanOrEqual(3);
+  const release = await ws.freeze("all"); release();
+});
+
 it("selects pytest without a shell and fails closed on an incompatible test path", async () => {
   const root = await mkdtemp(join(tmpdir(), "pineagent-python-runner-"));
   const ws = new Workspace(root, { leaseMs: 30_000, idleMs: 600_000 });

@@ -26,7 +26,8 @@ export class RoomSandbox {
     }
   }
 
-  async runTests(ownerId: string, runId: string, testPath: string | null = null, validator: "node" | "python" = "node"): Promise<TestResult> {
+  async runTests(ownerId: string, runId: string, testPath: string | null = null, validator: "node" | "python" = "node", signal?: AbortSignal): Promise<TestResult> {
+    signal?.throwIfAborted();
     if (!ownerId || !runId || (testPath && !this.ws.resolvePath(testPath))) throw new Error("Invalid verification scope");
     if (!["node", "python"].includes(validator) || (testPath && !(validator === "python" ? /\.py$/ : /\.[cm]?js$/).test(testPath))) throw new Error("Unsupported verification language");
     const argv = validator === "python"
@@ -36,11 +37,22 @@ export class RoomSandbox {
     // writes go through Workspace.applyOps, never a writable test container.
     const session = { workspace: this.ws.root, owner: `${ownerId}/run/${runId}`, grants: [] };
     const release = await this.ws.freeze("all");
+    let abort = () => {};
+    const cancelled = new Promise<never>((_, reject) => {
+      abort = () => { void this.service.quiesce(this.ws.root).then(() => reject(new Error("Verification cancelled")), reject); };
+      signal?.addEventListener("abort", abort, { once: true });
+    });
     try {
-      const generation = await this.service.ensure(session);
-      const result = await this.service.execute({ ...session, generation }, argv, 120_000);
-      return { exitCode: result.code, output: `${result.stdout}\n${result.stderr}`.slice(-48_000) };
+      signal?.throwIfAborted();
+      return await Promise.race([(async () => {
+        const generation = await this.service.ensure(session);
+        signal?.throwIfAborted();
+        const result = await this.service.execute({ ...session, generation }, argv, 120_000);
+        signal?.throwIfAborted();
+        return { exitCode: result.code, output: `${result.stdout}\n${result.stderr}`.slice(-48_000) };
+      })(), cancelled]);
     } finally {
+      signal?.removeEventListener("abort", abort);
       try { await this.service.quiesce(this.ws.root); }
       finally { release(); }
     }

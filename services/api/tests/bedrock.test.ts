@@ -1,7 +1,38 @@
 import { describe, expect, it } from "vitest";
 import { OpusRun, OPUS_MODEL, type ModelTransport } from "../src/models/bedrock";
+import { contentHash } from "@pineagent/harness";
 
 describe("bounded Opus model gateway", () => {
+  it("enforces a cumulative input budget before another provider request", async () => {
+    let calls = 0;
+    const run = new OpusRun({ runId: "budget", ownerId: "alice", maxCalls: 8, maxInputChars: 5000, transport: async () => {
+      calls++;
+      return { $metadata: {}, stream: (async function* () {
+        yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: '{"files":[{"path":"app.py","content":"value = 1"}]}' } } };
+        yield { messageStop: { stopReason: "end_turn" } };
+      })() };
+    } });
+    const input = { task: "feature", evidence: "x".repeat(3000), allowedWrites: ["app.py"] };
+    await run.patch(input);
+    await expect(run.patch(input)).rejects.toThrow("input budget");
+    expect(calls).toBe(1);
+  });
+  it("materializes a hash-bound feature edit without sending duplicate base contents", async () => {
+    const content = "export const value = 1;";
+    const run = new OpusRun({ runId: "edit", ownerId: "alice", transport: async input => {
+      const prompt = JSON.parse(input.messages![0].content![0].text!);
+      expect(prompt.bases).toBeUndefined();
+      expect(prompt.baseHashes["app.mjs"]).toBe(contentHash(content));
+      return { $metadata: {}, stream: (async function* () {
+        yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: JSON.stringify({ edits: [{ path: "app.mjs",
+          baseSha256: contentHash(content), changes: [{ before: "value = 1", after: "value = 2" }] }] }) } } };
+        yield { messageStop: { stopReason: "end_turn" } };
+      })() };
+    } });
+    const patch = await run.patch({ task: "change value", evidence: content, allowedWrites: ["app.mjs"], bases: [{ path: "app.mjs", content }] });
+    expect(patch.files).toEqual([{ path: "app.mjs", content: "export const value = 2;" }]);
+    expect(run.receipts()).toHaveLength(1);
+  });
   it("reports malformed patch output distinctly without exposing provider text", async () => {
     const run = new OpusRun({ runId: "r", ownerId: "alice", transport: async () => ({
       $metadata: { requestId: "format-failure" }, stream: (async function* () {

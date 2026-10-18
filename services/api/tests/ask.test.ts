@@ -23,6 +23,8 @@ it("answers through authenticated, bounded reads without routing, locks, patches
     expect(prompt).toContain("A Flask notes app");
     expect(prompt).not.toContain("NEVER_SEND");
     expect(input.system?.[0].text).toContain("read-only");
+    expect(input.system?.[0].text).toContain("create source files and new acceptance tests");
+    expect(input.system?.[0].text).not.toContain("baseSha256");
     return { $metadata: {}, stream: (async function* () {
       yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: '{"answer":"This is a Flask notes app. I have not changed any files."}' } } };
       yield { messageStop: { stopReason: "end_turn" } };
@@ -38,7 +40,7 @@ it("answers through authenticated, bounded reads without routing, locks, patches
     await expect.poll(() => harness.list()[0].state).toBe("done");
     expect(harness.list()[0]).toMatchObject({ mode: "ask", answer: "This is a Flask notes app. I have not changed any files.", writeSet: [], routerMode: null,
       evidencePaths: ["README.md", "app.py"] });
-    expect(receipt).toMatchObject({ mode: "ask", modelCalls: 1, executorModelCalls: 0 });
+    expect(receipt).toMatchObject({ mode: "ask", modelCalls: 1, executorModelCalls: 0, totalProviderCalls: 1, routingDecisions: [] });
     expect(model.receipts()).toMatchObject([{ purpose: "answer", status: "ok" }]);
     expect(calls).toBe(1);
     expect(checks).toBeGreaterThanOrEqual(2);
