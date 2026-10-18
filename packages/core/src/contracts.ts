@@ -75,7 +75,7 @@ export type RunView = {
   confidence?: number;
   writeSet: string[];
   blockedOn?: { path: string; holder: string };
-  error?: { nodeIndex: number; message: string };
+  error?: { nodeIndex: number; message: string; code?: string; phase?: string };
   startedAt: number;
   endedAt?: number;
 };

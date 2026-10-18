@@ -5,6 +5,32 @@ import { expect, it } from "vitest";
 import { Workspace } from "@pineagent/core/server";
 import type { RunEvent } from "@pineagent/core/contracts";
 import { LiveHarness } from "../src/harness/controller";
+import { ModelFailure } from "../src/models/bedrock";
+
+it("attributes a rejected patch to synthesis, not the last completed search, and counts the failed attempt", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pineagent-patch-error-"));
+  const files = { "app.py": "def value(): return 1", "test_app.py": "from app import value" };
+  for (const [path, text] of Object.entries(files)) await writeFile(join(root, path), text);
+  const ws = new Workspace(root, { leaseMs: 30000, idleMs: 600000 });
+  let receipt: Record<string, unknown> | undefined;
+  const harness = new LiveHarness({ context: { ws, roomId: "r", files: async () => Object.keys(files),
+    events: { run: () => {}, lockChanged: () => {}, fileChanged: () => {} } },
+    model: () => ({ plan: async () => ({ allowedWrites: ["app.py"], visibleTestPath: "test_app.py" }),
+      patch: async () => { throw new ModelFailure("MODEL_INVALID_JSON"); } }),
+    router: () => ({ route: async ({ candidates }) => ({ status: "selected", candidateId: candidates.find(c => c.routeLabel === "targeted_symbol_search")!.id }) }),
+    runTests: async () => { throw Error("Verification must not run"); }, receipt: (_id, result) => { receipt = result; },
+  });
+  try {
+    harness.start({ id: "alice", name: "Alice" }, "Fix value().");
+    await expect.poll(() => harness.list()[0].state).toBe("error");
+    const view = harness.list()[0];
+    expect(view.steps[view.error!.nodeIndex].tool).toBe("edit_code");
+    expect(view.error?.message).toContain("invalid JSON");
+    expect(receipt).toMatchObject({ executorModelCalls: 1, failureCode: "MODEL_INVALID_JSON", failurePhase: "synthesis" });
+    expect(await ws.read("app.py")).toMatchObject({ content: files["app.py"], version: 1 });
+    expect(ws.allLocks()).toEqual([]);
+  } finally { await harness.close(); }
+});
 
 async function setup(routeStatus: "selected" | "awaiting_approval" = "selected") {
   const root = await mkdtemp(join(tmpdir(), "pineagent-control-"));

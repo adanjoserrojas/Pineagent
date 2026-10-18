@@ -236,7 +236,7 @@ function RunCard({
 
       {run.state === "error" && run.error && (
         <p className="run-error" role="alert">
-          Failed at step {run.error.nodeIndex + 1}: {run.error.message}
+          {run.error.phase ? `Failed during ${run.error.phase}` : run.error.nodeIndex < 0 ? "Failed before execution" : `Failed at step ${run.error.nodeIndex + 1}`}: {run.error.message}
         </p>
       )}
 

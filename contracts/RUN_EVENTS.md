@@ -36,7 +36,7 @@ type RunView = {
   confidence?: number;              // top candidate's score
   writeSet: string[];
   blockedOn?: { path: string; holder: string };
-  error?: { nodeIndex: number; message: string };
+  error?: { nodeIndex: number; message: string; code?: string; phase?: string };
   startedAt: number; endedAt?: number;
 };
 ```
@@ -58,6 +58,8 @@ OpenAI Decisions is the primary Master-1 scorer (`routerMode: "openai"`, matchin
 | `run:event` | S→room | `RunEvent` | Every member reads every run (LLD 11); only the owner may act. |
 
 ## Browser rules
+
+Production errors include additive safe `code` and `phase` fields. Display the phase when available; `nodeIndex: -1` means before execution, never “step 0”. Model synthesis failures belong to `edit_code`, not the last successful discovery tool. Provider bodies, credentials, repository content and private reasoning are never included in errors. Failed model attempts remain counted in operator receipts.
 
 1. Keep one `RunView` per run; replace it only when `seq` is greater than the stored one.
 2. The plant shows the signed-in user's highest-priority run: `error > awaiting_approval > blocked > executing > routing > planning > done > idle`. `paused` shows as the firmware's `paused` face; `done` shows for a few seconds, then `idle`.

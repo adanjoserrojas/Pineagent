@@ -6,7 +6,7 @@ import { executeV8Dag, selectCandidateDags, prototypeTools, FROZEN_HISTORY,
   type Router, type RouteDecision, type Patch, type TestResult, type DagCandidate } from "@pineagent/harness";
 import { BackendTools, type EvidenceVersions } from "./tools";
 import { languageForPlan } from "./python";
-import type { ModelReceipt } from "../models/bedrock";
+import { ModelFailure, type ModelReceipt } from "../models/bedrock";
 
 type Model = {
   receipts?(): ModelReceipt[];
@@ -19,6 +19,21 @@ type Options = { context: HarnessContext; model(ownerId: string, runId: string):
   runTests(ownerId: string, runId: string, path?: string | null, validator?: "node" | "python"): Promise<TestResult>;
   receipt?(runId: string, result: Record<string, unknown>): void };
 const terminal = (run: Run) => run.view.state === "done" || run.view.state === "error";
+function failure(error: unknown, phase: string, aborted: boolean) {
+  if (error instanceof ModelFailure) return { code: error.code, phase, message: error.message };
+  const known: Record<string, [string, string]> = {
+    "Unsupported verification language": ["UNSUPPORTED_LANGUAGE", "Code mode currently verifies JavaScript/Node or Python/pytest projects. This test language is not supported."],
+    "Unsupported Python write/test scope": ["UNSUPPORTED_SCOPE", "The plan must name existing Python source files and a separate pytest test file; test changes are not authorized."],
+    "Evidence changed; a fresh run is required": ["STALE_EVIDENCE", "A file changed after it was read. Start a fresh run to use the current version."],
+    "Repository permission revoked": ["ACCESS_DENIED", "Repository access was lost. Check your GitHub access and reconnect."],
+    "Verification failed": ["TESTS_FAILED", "The patch did not pass verification within the recovery budget. Review the changes before retrying."],
+    "Invalid plan": ["INVALID_PLAN", "No valid coding plan was produced. Use Ask for questions or specify the source change and expected behavior."],
+  };
+  const item = error instanceof Error ? known[error.message] : undefined;
+  return { code: aborted ? "RUN_CANCELLED" : item?.[0] ?? "RUN_FAILED", phase,
+    message: aborted ? "Run cancelled or its time budget expired. Review any changes before retrying."
+      : item?.[1] ?? `Could not complete ${phase}. No further writes were authorized. Review any changes and retry; give the operator this run ID if it repeats.` };
+}
 const steps = (candidate: DagCandidate) => candidate.order.map(tool => ({ tool,
   detail: candidate.nodes.find(n => n.name === tool)?.description ?? tool,
   writes: candidate.nodes.find(n => n.name === tool)?.writes ?? [] }));
@@ -117,6 +132,8 @@ export class LiveHarness implements Harness {
     const timeout = setTimeout(() => run.abort.abort(), 15 * 60_000);
     let providerAttempts = 0;
     let executorModelCalls = 0;
+    let phase = "setup";
+    let failed: ReturnType<typeof failure> | undefined;
     let model: Model | undefined;
     let observations: EvidenceVersions = new Map();
     let validator: "node" | "python" = "node";
@@ -134,9 +151,15 @@ export class LiveHarness implements Harness {
     };
     const runtime = (allowedWrites: string[], outputLimit = 48_000) => new BackendTools({ ws: context.ws, ownerId, runId,
       allowedWrites, outputLimit, observations, validator, files: context.files, boundary,
-      changed: context.events.fileChanged, runTests: path => this.options.runTests(ownerId, runId, path, validator),
+      changed: context.events.fileChanged, runTests: path => {
+        phase = "verification";
+        const i = run.view.steps.findIndex(step => step.tool === (path ? "run_targeted_tests" : "run_full_tests"));
+        this.emit(run, { nodeIndex: i >= 0 ? i : run.view.nodeIndex });
+        return this.options.runTests(ownerId, runId, path, validator);
+      },
       progress: event => {
-        const i = run.view.steps.findIndex(step => step.tool === event.name);
+        const name = event.name === "read_files" ? "read_target_files" : event.name === "write_files" ? "edit_code" : event.name;
+        const i = run.view.steps.findIndex(step => step.tool === name);
         this.emit(run, { nodeIndex: i >= 0 ? i : run.view.nodeIndex });
       } });
     try {
@@ -146,7 +169,9 @@ export class LiveHarness implements Harness {
       planning: while (true) {
         await boundary();
         this.emit(run, { state: "planning" });
+        phase = "discovery";
         const files = await runtime([]).listFiles();
+        phase = "planning";
         providerAttempts++;
         const plan = await activeModel.plan(run.view.task, files, run.abort.signal);
         if (!plan.allowedWrites.length || plan.allowedWrites.length > 12 || plan.allowedWrites.some(p => !files.includes(p))
@@ -160,6 +185,7 @@ export class LiveHarness implements Harness {
           await boundary();
           this.emit(run, { state: "routing", candidates: undefined });
           const router: Router = { route: async input => {
+            phase = "routing";
             await boundary();
             const decision: RouteDecision = run.choice
               ? { status: "selected", candidateId: run.choice, reasonCode: "owner_approved", routerMode: run.view.routerMode ?? undefined }
@@ -170,6 +196,7 @@ export class LiveHarness implements Harness {
             const mode = decision.routerMode;
             this.emit(run, { routerMode: mode && mode !== "oracle" ? mode : run.view.routerMode,
               confidence: decision.confidence, steps: selected ? steps(selected) : [], state: "executing" });
+            phase = "evidence gathering";
             return decision;
           } };
           const result = await executeV8Dag({ trialRoot: context.ws.root,
@@ -177,20 +204,26 @@ export class LiveHarness implements Harness {
             task: { id: runId, prompt: run.view.task, ...plan }, candidates: run.candidates, router, history: FROZEN_HISTORY,
             runtimeFactory: ({ allowedWrites, outputLimit }) => runtime(allowedWrites, outputLimit),
             synthesize: async input => { await boundary(); await runtime([]).assertFresh();
+              phase = "synthesis";
+              this.emit(run, { nodeIndex: run.view.steps.findIndex(step => step.tool === "edit_code") });
               providerAttempts++;
+              executorModelCalls++;
               return activeModel.patch({ ...input, allowedWrites: plan.allowedWrites }, run.abort.signal); },
             fallbackAgent: async input => {
               await boundary(); this.emit(run, { codingRecovery: "warm_agent" });
               const tools = runtime(plan.allowedWrites);
               await tools.assertFresh();
+              phase = "recovery";
+              this.emit(run, { nodeIndex: run.view.steps.findIndex(step => step.tool === "edit_code") });
               providerAttempts++;
+              executorModelCalls++;
               const patch = await activeModel.patch({ task: run.view.task, evidence: input.evidencePacket, allowedWrites: plan.allowedWrites }, run.abort.signal, true);
               await tools.writeFiles(patch.files);
               return { status: "patched", modelCalls: 1, usage: patch.usage };
             },
           });
-          executorModelCalls += result.execution.modelCalls;
           if (result.execution.status === "awaiting_approval") {
+            phase = "approval";
             await this.release(run);
             const candidates = run.candidates.map(c => ({ id: c.id, score: result.route.probabilities?.[c.id] ?? 0, steps: steps(c) }))
               .sort((a, b) => b.score - a.score).slice(0, 3);
@@ -216,9 +249,10 @@ export class LiveHarness implements Harness {
           return;
         }
       }
-    } catch {
+    } catch (error) {
+      failed = failure(error, phase, run.abort.signal.aborted);
       this.emit(run, { state: "error", endedAt: Date.now(), error: { nodeIndex: run.view.nodeIndex,
-        message: "Run stopped safely: verification, evidence, access, or time budget failed. Review changes before starting a fresh run." } });
+        ...failed } });
     } finally {
       clearTimeout(timeout);
       try { await this.release(run); }
@@ -226,6 +260,7 @@ export class LiveHarness implements Harness {
       const ledger = model?.receipts?.();
       this.options.receipt?.(runId, { status: run.view.state, modelCalls: ledger?.length ?? providerAttempts, modelAttempts: providerAttempts, executorModelCalls,
         modelReceipts: ledger,
+        ...(failed ? { failureCode: failed.code, failurePhase: failed.phase } : {}),
         routerMode: run.view.routerMode, codingRecovery: run.view.codingRecovery, wallMs: Date.now() - run.view.startedAt });
     }
   }
