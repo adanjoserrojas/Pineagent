@@ -19,6 +19,7 @@ import { BranchActivity } from "./ui/BranchActivity";
 import { ResizeHandle } from "./ui/ResizeHandle";
 import { defaultLayout, useWorkspaceLayout } from "./ui/useWorkspaceLayout";
 import { EditorGroups, type SplitDirection } from "./editor/EditorGroups";
+import { WorkspaceTerminal } from "./terminal/WorkspaceTerminal";
 
 function apiUrl() {
   // ?api= lets e2e tests point a page at their own mock instance; dev builds only.
@@ -36,6 +37,8 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
   const store = useMemo(createWorkspaceStore, []);
   const ws = useWorkspace(store);
   const [socket, setSocket] = useState<WorkspaceSocket | null>(null);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const terminalToggle = useRef<HTMLButtonElement>(null);
   const [paths, setPaths] = useState<[string | null, string | null]>([null, null]);
   const [activeEditor, setActiveEditor] = useState<0 | 1>(0);
   const [split, setSplit] = useState<SplitDirection>(null);
@@ -226,6 +229,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
             <button type="button" aria-label="Split editor down" title="Two editors stacked" onClick={() => splitEditor("down")}>⊟ <span>Split down</span></button>
             <button type="button" aria-label="Toggle activity" aria-expanded={layout.activityVisible} onClick={() => setLayout((l) => ({ ...l, activityVisible: !l.activityVisible }))}>Activity</button>
             <button type="button" aria-label="Reset panel layout" onClick={() => setLayout(defaultLayout)}>Reset layout</button>
+            <button ref={terminalToggle} type="button" aria-label="Toggle terminal" aria-expanded={terminalOpen} disabled={ws.connection !== "connected"} onClick={() => setTerminalOpen(open => !open)}>Terminal</button>
           </div>
           <EditorGroups paths={paths} active={activeEditor} split={split} manager={manager}
             connected={ws.connection === "connected"} selfId={ws.self?.userId ?? null} members={ws.members}
@@ -243,6 +247,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
           {layout.activityVisible && <ResizeHandle label="Resize activity" axis="y" reverse value={activityHeight} min={90} max={Math.max(90, Math.min(360, available.height * 0.4))}
             onChange={(activity) => setLayout((l) => ({ ...l, activity }))} onReset={() => setLayout((l) => ({ ...l, activity: defaultLayout.activity }))} />}
           <div className="activity-dock" hidden={!layout.activityVisible}><BranchActivity ws={ws} onCollapse={() => setLayout((l) => ({ ...l, activityVisible: false }))} /></div>
+          {terminalOpen && socket && <WorkspaceTerminal socket={socket} onClose={() => { setTerminalOpen(false); terminalToggle.current?.focus(); }} />}
         </main>
         {layout.agentsVisible && <ResizeHandle label="Resize agents" reverse value={agentWidth} min={240} max={Math.max(240, Math.min(520, sideBudget - (layout.filesVisible ? explorerWidth : 0)))}
           onChange={(agents) => setLayout((l) => ({ ...l, agents }))} onReset={() => setLayout((l) => ({ ...l, agents: defaultLayout.agents }))} />}
