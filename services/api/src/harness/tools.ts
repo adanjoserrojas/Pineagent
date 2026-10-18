@@ -111,15 +111,10 @@ export class BackendTools implements ToolRuntime {
           && l.holder === this.options.ownerId && l.holderType === "run");
         if (!lock) throw new Error("Run no longer owns its write set");
       }
-      await this.assertFresh();
-      for (const file of files) {
-        const seen = this.observations.get(file.path)!;
-        const ops = [{ offset: 0, length: seen.content.length, text: file.content }];
-        const result = await this.options.ws.applyOps(file.path, this.options.ownerId, seen.version, ops, this.options.runId);
-        if (!result.ok) throw new Error(`Workspace rejected patch: ${result.code}`);
-        this.observations.set(file.path, { content: file.content, version: result.version });
-        this.options.changed(file.path, result.version, ops, `agent-run/${this.options.runId}`);
-      }
+      await this.options.ws.applyRunPatch(this.options.ownerId, this.options.runId, this.observations, files, (path, version, ops) => {
+        this.observations.set(path, { content: files.find(file => file.path === path)!.content, version });
+        this.options.changed(path, version, ops, `agent-run/${this.options.runId}`);
+      });
       return files.map(file => file.path);
     });
   }

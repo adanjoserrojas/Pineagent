@@ -11,6 +11,22 @@ async function fixture() {
   return { ws: new Workspace(root, { leaseMs: 100, idleMs: 1000 }, () => now), advance: () => { now = 101; } };
 }
 
+it("rejects queued edits and claims after their credential is revoked", async () => {
+  const { ws } = await fixture();
+  ws.acquire("a.ts", "file", "alice");
+  const release = await ws.freeze("all");
+  let active = true;
+  const edit = ws.applyOps("a.ts", "alice", 1, [{ offset: 0, length: 3, text: "new" }], undefined, () => active);
+  const claim = ws.acquireSafely("b.ts", "file", "alice", () => active);
+  const rejectedEdit = expect(edit).rejects.toThrow("authorization expired");
+  const rejectedClaim = expect(claim).rejects.toThrow("authorization expired");
+  active = false;
+  release();
+  await Promise.all([rejectedEdit, rejectedClaim]);
+  expect(await ws.read("a.ts")).toEqual({ content: "old", version: 1 });
+  expect(ws.allLocks().map(lock => lock.path)).toEqual(["a.ts"]);
+});
+
 it("retains authority when a container cannot be stopped, then allows a safe retry", async () => {
   const { ws } = await fixture();
   ws.acquire("a.ts", "file", "alice");

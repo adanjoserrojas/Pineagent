@@ -267,7 +267,7 @@ export function createGateway(opts: GatewayOptions) {
       // Malformed requests get no ack; the client's timeout handles it.
       if (!j || (kind !== "file" && kind !== "dir") || !j.ws.resolvePath(target) || (kind === "dir" && !path.endsWith("/"))) return;
       let res;
-      try { res = await j.ws.acquireSafely(path, kind, user.id); }
+      try { res = await j.ws.acquireSafely(path, kind, user.id, () => active(user) && socket.connected); }
       catch { log("sandbox.fence_failed", { room: j.room, operation: "acquire" }); socket.disconnect(true); return; }
       await j.ws.lockSaved(path); // written through before the ack (contract rule 5)
       if (res.ok) {
@@ -281,7 +281,7 @@ export function createGateway(opts: GatewayOptions) {
     socket.on("lock:release", async ({ path }, ack) => {
       const j = await joined();
       let released;
-      try { released = await j?.ws.releaseSafely(path, user.id); }
+      try { released = await j?.ws.releaseSafely(path, user.id, () => active(user) && socket.connected); }
       catch { log("sandbox.fence_failed", { room: j?.room, operation: "release" }); socket.disconnect(true); return; }
       if (released) await j!.ws.lockSaved(path);
       ack({ ok: true });
@@ -303,7 +303,7 @@ export function createGateway(opts: GatewayOptions) {
         return ack({ ok: false, code: "STALE", currentVersion: 0 });
       }
       let res;
-      try { res = await j.ws.applyOps(path, user.id, baseVersion, ops); }
+      try { res = await j.ws.applyOps(path, user.id, baseVersion, ops, undefined, () => active(user) && socket.connected); }
       catch { log("workspace.write_failed", { room: j.room }); socket.disconnect(true); return; }
       ack(res);
       if (res.ok) {

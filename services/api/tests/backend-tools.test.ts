@@ -23,6 +23,30 @@ it("applies a model patch only through the run's lock and observed file version"
   expect(changes).toEqual(["src/value.mjs"]);
 });
 
+it("keeps observed dependencies stable until the complete patch reaches disk", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pineagent-transaction-"));
+  await writeFile(join(root, "value.mjs"), "old");
+  await writeFile(join(root, "dependency.mjs"), "old");
+  const ws = new Workspace(root, { leaseMs: 30_000, idleMs: 600_000 });
+  ws.acquire("dependency.mjs", "file", "bob");
+  ws.acquireForRun(["value.mjs"], "alice", "r1");
+  const order: string[] = [];
+  let edit: Promise<unknown> | undefined;
+  ws.setWriteFence(async path => {
+    if (path === "value.mjs") {
+      edit = ws.applyOps("dependency.mjs", "bob", 1, [{ offset: 0, length: 3, text: "new" }]).then(() => { order.push("dependency"); });
+      await Promise.race([edit, new Promise(resolve => setTimeout(resolve, 300))]);
+    }
+  });
+  const tools = new BackendTools({ ws, ownerId: "alice", runId: "r1", allowedWrites: ["value.mjs"],
+    files: async () => ["value.mjs", "dependency.mjs"], runTests: async () => ({ exitCode: 0, output: "ok" }),
+    changed: () => { order.push("patch"); }, boundary: async () => {} });
+  await tools.readFiles(["value.mjs", "dependency.mjs"]);
+  await tools.writeFiles([{ path: "value.mjs", content: "patched" }]);
+  await edit;
+  expect(order).toEqual(["patch", "dependency"]);
+});
+
 it("rejects stale evidence after a pause and never treats read-only recovery as write approval", async () => {
   const root = await mkdtemp(join(tmpdir(), "pineagent-stale-"));
   await writeFile(join(root, "value.mjs"), "old");
