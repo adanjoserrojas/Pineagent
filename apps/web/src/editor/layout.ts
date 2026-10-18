@@ -1,6 +1,6 @@
 // Which files are open in which editor group. Pure functions so the rules are unit-testable.
-// A file is open in at most one group: its FileSession has a single Monaco binding, so showing
-// it twice would need shared models. Opening a file that is already open just reveals its tab.
+// Explorer reveals an existing tab. Explicit Crown splits can duplicate the active file:
+// FileSession fans edits out to both views while retaining a single writer lease.
 
 export type Group = { tabs: string[]; active: string | null };
 export type Layout = { groups: Group[]; focused: number };
@@ -17,6 +17,7 @@ export const isImagePath = (path: string) => {
 export const focusedActive = (l: Layout): string | null => l.groups[l.focused]?.active ?? null;
 
 export function openIn(l: Layout, path: string): Layout {
+  if (l.groups[l.focused].tabs.includes(path)) return activate(l, l.focused, path);
   const at = l.groups.findIndex((g) => g.tabs.includes(path));
   if (at >= 0) return activate(l, at, path);
   const groups = l.groups.map((g, i) => (i === l.focused ? { tabs: [...g.tabs, path], active: path } : g));
@@ -45,9 +46,10 @@ export function close(l: Layout, group: number, path: string): Layout {
   return { ...l, groups: l.groups.map((x, i) => (i === group ? { tabs, active } : x)) };
 }
 
-export function split(l: Layout): Layout {
+export function split(l: Layout, copyActive = false): Layout {
   if (l.groups.length > 1) return l;
-  return { groups: [...l.groups, { tabs: [], active: null }], focused: 1 };
+  const path = copyActive ? focusedActive(l) : null;
+  return { groups: [...l.groups, { tabs: path ? [path] : [], active: path }], focused: 1 };
 }
 
 export const activePaths = (l: Layout): string[] => l.groups.flatMap((g) => (g.active ? [g.active] : []));
