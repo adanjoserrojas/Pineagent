@@ -1,0 +1,40 @@
+@font-face {
+  font-family: "Recursive Sans";
+  src: url("./assets/fonts/Recursive-VF-1.085.woff2") format("woff2");
+  font-weight: 300 1000;
+  font-style: normal;
+  font-display: swap;
+  font-variation-settings: "MONO" 0, "CASL" 0.25, "CRSV" 0.5;
+}
+@font-face {
+  font-family: "Recursive Mono";
+  src: url("./assets/fonts/Recursive-VF-1.085.woff2") format("woff2");
+  font-weight: 300 1000;
+  font-style: normal;
+  font-display: swap;
+  font-variation-settings: "MONO" 1, "CASL" 0.1, "CRSV" 0;
+}
+:root {
+  --sans: "Recursive Sans", system-ui, sans-serif;
+  --mono: "Recursive Mono", ui-monospace, monospace;
+}
+body { font-size: 13px; -webkit-font-smoothing: antialiased; }
+button, input, textarea { font-family: var(--sans); }
+.brand { font-weight: 650; font-size: 21px; letter-spacing: -0.8px; font-variation-settings: "MONO" 0, "CASL" 0.85, "CRSV" 0.5; }
+.brand-edition { font-variation-settings: normal; }
+.workspace-welcome h1 { font-weight: 520; font-size: clamp(26px, 2.6vw, 38px); font-variation-settings: "MONO" 0, "CASL" 0.8, "CRSV" 0.5; }
+.workspace-welcome > p:not(.section-label) { font-size: 13px; }
+.panel-controls, .workbench-toolbar { font-size: 11px; }
+.group-toolbar { font-size: 10px; }
+.section-label { letter-spacing: 1.1px; font-weight: 550; }
+.run-task { font-weight: 550; font-variation-settings: "MONO" 0, "CASL" 0.4, "CRSV" 0.5; }
+.run-owner, .plant-title { font-weight: 550; }
+.editor-tab { font-size: 12px; }
+.btn-primary { font-weight: 650; letter-spacing: -0.2px; }
+.mono, code, kbd { font-family: var(--mono); font-variation-settings: "MONO" 1, "CASL" 0.1, "CRSV" 0; }
+@media (max-width: 480px) {
+  .brand { font-size: 18px; }
+  .workbench-toolbar > span:first-child { display: none; }
+  .workbench-toolbar { gap: 3px; font-size: 10px; }
+  .workbench-toolbar button { padding: 4px 6px; }
+}

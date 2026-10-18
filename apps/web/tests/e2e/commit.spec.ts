@@ -86,7 +86,8 @@ test("the last keystrokes before committing are in the commit", async ({ browser
   await dialog(alice).getByRole("button", { name: "Commit 1 file" }).click();
   await expect(dialog(alice).getByText(/^Committed/)).toBeVisible();
   const committed = await (await repo()).run(["show", "HEAD:src/auth.ts"]);
-  expect(committed.startsWith("// typed right before committing!\n")).toBe(true);
+  // The mock copies the checkout's line endings; Windows fixtures may be CRLF.
+  expect(committed).toMatch(/^\/\/ typed right before committing!\r?\n/);
 });
 
 test("commit and push lands on the remote", async ({ browser }) => {

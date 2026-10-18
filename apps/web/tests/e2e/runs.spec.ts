@@ -76,7 +76,7 @@ test("the agent locks its file: the owner's editor is read-only until it finishe
   await expect(card(alice).getByTestId("run-state")).toHaveText("done", { timeout: 15_000 });
   await expect(alice.getByTestId("editor-status")).toContainText("Viewing");
   await expect.poll(() => alice.evaluate(() => (window as unknown as { __editorText?: () => string }).__editorText?.() ?? "")).toMatch(
-    /^\/\/ alice's agent: tidy auth\.ts\n/,
+    /^\/\/ alice's agent: tidy auth\.ts\r?\n/,
   );
 
   await alice.getByRole("button", { name: /^Commit, / }).click();

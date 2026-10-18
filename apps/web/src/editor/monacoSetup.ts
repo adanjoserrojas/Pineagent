@@ -17,9 +17,11 @@ self.MonacoEnvironment = {
   },
 };
 loader.config({ monaco });
+// Monaco measures glyphs once; refresh after the local variable font is ready.
+void document.fonts.load("14px 'Recursive Mono'").then(() => monaco.editor.remeasureFonts()).catch(() => {});
 
-// Only the open file is a model, so cross-file imports would all show as errors. Keep syntax
-// checks, drop semantic ones until the editor knows about the whole repo.
+// Only visible files have models, so imports outside the editor groups would show errors.
+// Keep syntax checks, drop semantic ones until the editor knows about the whole repo.
 monaco.typescript.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true });
 monaco.typescript.javascriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true });
 
@@ -36,17 +38,17 @@ monaco.editor.defineTheme("pineagent", {
     { token: "type.identifier", foreground: "8CE6BA" },
   ],
   colors: {
-    "editor.background": "#0E1411",
-    "editor.foreground": "#E6EDE8",
-    "editor.lineHighlightBackground": "#121A16",
-    "editor.lineHighlightBorder": "#121A16",
-    "editorLineNumber.foreground": "#56685E",
-    "editorLineNumber.activeForeground": "#9AABA1",
-    "editor.selectionBackground": "#1E3550",
-    "editorCursor.foreground": "#8FC8FF",
-    "editorIndentGuide.background1": "#1A2A22",
-    "editorWidget.background": "#121A16",
-    "editorWidget.border": "#26332C",
-    "scrollbarSlider.background": "#26332C80",
+    "editor.background": "#101713",
+    "editor.foreground": "#E5EBE4",
+    "editor.lineHighlightBackground": "#151E19",
+    "editor.lineHighlightBorder": "#151E19",
+    "editorLineNumber.foreground": "#829187",
+    "editorLineNumber.activeForeground": "#94A396",
+    "editor.selectionBackground": "#24384A",
+    "editorCursor.foreground": "#ACCAF1",
+    "editorIndentGuide.background1": "#1D2921",
+    "editorWidget.background": "#151E19",
+    "editorWidget.border": "#2A372E",
+    "scrollbarSlider.background": "#2A372E80",
   },
 });
