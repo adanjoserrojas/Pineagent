@@ -64,7 +64,12 @@ export default function EditorPane({
     editorRef.current = editor;
     monacoRef.current = monaco;
     // e2e reads the exact buffer through this; Monaco's DOM only renders visible lines.
-    if (DEV_TOOLS) (window as unknown as { __editorText?: () => string }).__editorText = () => editor.getValue();
+    // With split groups there are several editors; the one last focused answers.
+    if (DEV_TOOLS) {
+      const expose = () => ((window as unknown as { __editorText?: () => string }).__editorText = () => editor.getValue());
+      expose();
+      editor.onDidFocusEditorText(expose);
+    }
     editor.onDidChangeModelContent((e) => {
       if (applyingRemote.current || e.isFlush) return;
       // All offsets in one event refer to the text before the event. Applying from the end of the
@@ -129,12 +134,6 @@ export default function EditorPane({
 
   return (
     <section className="editor" aria-label={`Editor: ${path}`} aria-busy={switching || state.status === "loading"}>
-      <div className="editor-tabs" role="tablist">
-        <span role="tab" aria-selected="true" className={`editor-tab mono editor-tab-${switching ? "loading" : state.status}`}>
-          {path}
-        </span>
-      </div>
-
       {state.lostText !== null && !switching && (
         <section className="lost-banner" role="alert" aria-labelledby="lost-title">
           <div>

@@ -14,6 +14,23 @@ export type ReadResult = FileState | { unsupported: "binary" | "too_large" } | n
 // Bigger files aren't opened in the editor: every viewer holds the whole text.
 export const MAX_FILE_BYTES = 1_000_000;
 
+// PROPOSED image viewing: read-only, sent as base64 in one ack, so the cap is on the file size.
+export const MAX_IMAGE_BYTES = 2_000_000;
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  ico: "image/x-icon",
+  bmp: "image/bmp",
+  avif: "image/avif",
+};
+export type ImageResult =
+  | { ok: true; mime: string; data: string; bytes: number }
+  | { ok: false; code: "NOT_FOUND" | "UNSUPPORTED" | "TOO_LARGE" };
+
 export type AcquireResult = { ok: true; lock: Lock; created: boolean } | { ok: false; code: "HELD"; lock: Lock };
 export type OpsResult = { ok: true; version: number } | { ok: false; code: "NOT_HOLDER" | "STALE"; currentVersion: number };
 
@@ -199,6 +216,24 @@ export class Workspace {
       return state;
     } catch {
       return null;
+    }
+  }
+
+  // An image file's bytes for the read-only viewer. Same path safety as open(); never cached,
+  // since the viewer doesn't edit and Git operations can replace the file at any time.
+  async image(path: string): Promise<ImageResult> {
+    const full = this.resolvePath(path);
+    if (!full || !(await this.inside(full))) return { ok: false, code: "NOT_FOUND" };
+    try {
+      const info = await stat(full);
+      if (!info.isFile()) return { ok: false, code: "NOT_FOUND" };
+      const mime = IMAGE_MIME[(path.split(".").pop() ?? "").toLowerCase()];
+      if (!path.includes(".") || !mime) return { ok: false, code: "UNSUPPORTED" };
+      if (info.size > MAX_IMAGE_BYTES) return { ok: false, code: "TOO_LARGE" };
+      const bytes = await readFile(full);
+      return { ok: true, mime, data: bytes.toString("base64"), bytes: bytes.length };
+    } catch {
+      return { ok: false, code: "NOT_FOUND" };
     }
   }
 

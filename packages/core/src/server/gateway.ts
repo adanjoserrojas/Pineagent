@@ -246,6 +246,13 @@ export function createGateway(opts: GatewayOptions) {
       ack({ ok: true, path, version: file.version, content: file.content, hash });
     });
 
+    socket.on("file:image", async ({ path }, ack) => {
+      const j = await joined();
+      if (!j || typeof path !== "string") return ack({ ok: false, code: "NOT_FOUND" });
+      const res = await j.ws.image(path);
+      ack(res.ok ? { ...res, path } : res);
+    });
+
     socket.on("lock:acquire", async ({ path, kind }, ack) => {
       const j = await joined();
       const target = kind === "dir" && typeof path === "string" && path.endsWith("/") ? path.slice(0, -1) : path;

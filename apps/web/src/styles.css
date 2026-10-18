@@ -130,6 +130,10 @@ button { font: inherit; }
   .tree-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; position: relative; }
   .workspace-main { min-height: 0; }
 }
+@media (max-width: 899px) {
+  .editor-groups { flex-direction: column; }
+  .editor-group + .editor-group { border-left: 0; border-top: 1px solid var(--line); }
+}
 /* Narrow screens stack the panels; the file list keeps the editor reachable below it. */
 @media (max-width: 899px) {
   .tree-list { max-height: 45vh; overflow-y: auto; position: relative; }
@@ -176,11 +180,36 @@ button { font: inherit; }
 .workspace-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; min-height: 60vh; }
 .workspace-main > .editor-note { margin: auto; }
 .editor { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
-.editor-tabs { display: flex; border-bottom: 1px solid var(--line); background: var(--panel); overflow-x: auto; }
+.editor-groups { flex: 1 1 auto; display: flex; min-height: 0; min-width: 0; }
+.editor-group { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.editor-group + .editor-group { border-left: 1px solid var(--line); }
+.editor-group > .editor-note { margin: auto; }
+.editor-tabbar { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--panel); min-height: 39px; }
+.editor-tabs { display: flex; flex: 1 1 auto; min-width: 0; overflow-x: auto; }
 .editor-tab {
-  display: inline-flex; align-items: center; height: 38px; padding: 0 14px;
-  border-right: 1px solid var(--line); border-top: 2px solid var(--muted); background: var(--ground);
+  display: inline-flex; flex: 0 0 auto; align-items: center; height: 38px; padding: 0 4px 0 12px; gap: 4px;
+  border-right: 1px solid var(--line); border-top: 2px solid transparent; background: var(--panel); color: var(--muted);
 }
+.editor-tab-active { background: var(--ground); color: var(--text); border-top-color: var(--muted); }
+.editor-group-focused .editor-tab-active { border-top-color: var(--action); }
+.tab-label { border: 0; background: none; color: inherit; cursor: pointer; padding: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-close {
+  width: 22px; height: 22px; border: 0; border-radius: 5px; background: none; color: var(--muted);
+  font-size: 16px; line-height: 1; cursor: pointer;
+}
+.tab-close:hover { background: var(--raised); color: var(--text); }
+.tab-action { border: 0; border-left: 1px solid var(--line); background: none; color: var(--muted); padding: 0 12px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+.tab-action:hover { background: var(--raised); color: var(--text); }
+.image-viewer { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.image-stage {
+  flex: 1 1 auto; min-height: 320px; position: relative; display: flex; overflow: auto;
+  background-color: var(--ground);
+  background-image: conic-gradient(#151e19 25%, transparent 0 50%, #151e19 0 75%, transparent 0);
+  background-size: 20px 20px;
+}
+.image-actual img { margin: auto; display: block; flex: 0 0 auto; }
+/* scale-down: big images shrink to the pane, small ones stay at their natural size. */
+.image-fit img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: scale-down; }
 .editor-body { flex: 1 1 auto; min-height: 320px; position: relative; display: flex; }
 .editor-body > section, .editor-body > div:not(.editor-note) { flex: 1 1 auto; }
 .editor-note { margin: auto; padding: 24px; color: var(--muted); text-align: center; }
@@ -193,8 +222,8 @@ button { font: inherit; }
   display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 6px 16px;
   border-top: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12px;
 }
-.editor-tab-writing { border-top-color: var(--you); }
-.editor-tab-readonly { border-top-color: var(--other); }
+.editor-tab-writing.editor-tab-active { border-top-color: var(--you); }
+.editor-tab-readonly.editor-tab-active { border-top-color: var(--other); }
 .status-writing, .status-acquiring { color: var(--you-text); }
 .status-readonly { color: var(--other-text); }
 .holder-strip {
