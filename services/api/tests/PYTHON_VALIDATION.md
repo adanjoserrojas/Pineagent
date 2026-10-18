@@ -35,3 +35,31 @@ loaded from its trusted installed entry point with an isolated interpreter; a lo
 that sandbox. Missing dependencies and unsupported languages fail closed; no installs
 or arbitrary shell commands are inferred. Python unittest/build systems and dynamic
 import discovery are not claimed. Crown and the original Ratatui source are unchanged.
+
+## Release checkpoint
+
+- Full Linux suite: harness 34/34, web 121/121, API 71/71 (including real Docker,
+  CLI, PTY and My_App); workspace typechecks and three freeze checks passed.
+- Browser: 59 ordinary workspace tests passed in the complete 62-test run. Its
+  three real-terminal tests failed because the old preview fixture referenced a
+  Docker image ID removed when its tag was rebuilt. After moving the fixture to
+  the pinned Python image, all three passed (390/900/1440px). No product/test
+  assertion was weakened. Earlier focused 19-test browser run also passed.
+- Two independent read-only reviews found no remaining blocker after fixing
+  Node search isolation and trusted pytest loading.
+- CloudFormation `PineagentModelAccess`: CREATE_COMPLETE, exactly three additive
+  IAM policies on the existing role. No new users, keys or host infrastructure.
+- One live Opus request from the EC2 `pineagent-app` instance role succeeded
+  (20 input / 32 output tokens). It reached the intentionally tiny token limit;
+  this proves invocation access only, not a completed coding/gateway run.
+- Release `4b88474d557f` and its image were built/checksummed and staged in the
+  existing private release bucket. The application was NOT switched.
+- Deployment blocker: live health changed from `5b6e8f861436` to `f9c7f0d9de20`
+  during this work. That new commit was unavailable locally. Owner coordination
+  is required before replacing/integrating another engineer's release.
+- GitHub sign-in in the opened Pineagent tab is still needed for the authenticated
+  deployed My_App/Opus/scorer/terminal test. No live approval gate was bypassed.
+
+Rebuild the final reviewed commit after resolving release ownership; the later
+installer safety guard requires the expected previous SHA explicitly. No branch
+push, PR, merge, or GitHub change to My_App was performed by this session.

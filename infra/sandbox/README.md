@@ -33,3 +33,8 @@ reconciliation remain out of scope.
 and restores the previous release on failure. It retains diagnostic/rollback
 artifacts. An authenticated deployed browser/provider check is still required;
 packaging or health flags alone do not establish end-to-end functionality.
+
+Installer arguments: release SHA, release archive SHA256, image archive SHA256,
+image configuration ID, and the explicitly reviewed previous release SHA. It refuses
+to proceed if the live release differs, including a change during download. Coordinate
+with other deployers before invoking it; this is not a cross-tool deployment lock.

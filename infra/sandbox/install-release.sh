@@ -6,7 +6,8 @@ SHA=$1
 SUM=$2
 IMAGE_SUM=$3
 IMAGE_ID=$4
-[[ "$SHA" =~ ^[a-f0-9]{12}$ && "$SUM" =~ ^[a-f0-9]{64}$ && "$IMAGE_SUM" =~ ^[a-f0-9]{64}$ && "$IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]] || exit 2
+EXPECTED_PREVIOUS=$5
+[[ "$SHA" =~ ^[a-f0-9]{12}$ && "$SUM" =~ ^[a-f0-9]{64}$ && "$IMAGE_SUM" =~ ^[a-f0-9]{64}$ && "$IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ && "$EXPECTED_PREVIOUS" =~ ^[a-f0-9]{12}$ ]] || exit 2
 test "$(id -u)" = 0
 test "$(aws sts get-caller-identity --query Account --output text)" = 004575106238
 UID_APP=$(id -u pineagent)
@@ -14,6 +15,7 @@ test "$UID_APP" -gt 0
 STAGE=$(mktemp -d /opt/pineagent/pty-stage.XXXXXX)
 PREV=$(readlink -f /opt/pineagent/current)
 [[ "$PREV" == /opt/pineagent/releases/* && -d "$PREV" ]] || exit 2
+test "$(basename "$PREV")" = "$EXPECTED_PREVIOUS"
 DIR=/opt/pineagent/releases/$SHA
 test ! -e "$DIR"
 aws s3 cp --region us-east-2 --only-show-errors "s3://pineagent-releases-004575106238/releases/$SHA.tgz" "$STAGE/release.tgz"
@@ -47,6 +49,9 @@ rollback() {
   echo "Rolled back to $(basename "$PREV"); diagnostic artifacts retained at $STAGE" >&2
   exit 1
 }
+# Do not overwrite a release deployed while artifacts were being prepared.
+# This check is before the rollback trap: a foreign release must never be reverted.
+test "$(readlink -f /opt/pineagent/current)" = "$PREV"
 trap rollback ERR
 systemctl stop pineagent-api
 if test "$(systemctl show pineagent-sandbox -p LoadState --value)" != not-found; then
