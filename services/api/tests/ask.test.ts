@@ -26,7 +26,8 @@ it("answers through authenticated, bounded reads without routing, locks, patches
     expect(input.system?.[0].text).toContain("create source files and new acceptance tests");
     expect(input.system?.[0].text).not.toContain("baseSha256");
     return { $metadata: {}, stream: (async function* () {
-      yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: '{"answer":"This is a Flask notes app. I have not changed any files."}' } } };
+      yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'This is a Flask notes app. ' } } };
+      yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'I have not changed any files.' } } };
       yield { messageStop: { stopReason: "end_turn" } };
     })() };
   } });
