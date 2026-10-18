@@ -75,3 +75,19 @@ it("stops sandboxes before Git enters a frozen region and unwinds a failed fence
   expect(calls).toBe(2);
   release();
 });
+
+it("does not interrupt a holder for denied edits, denied claims, renewal or foreign release", async () => {
+  const { ws } = await fixture();
+  ws.acquire("a.ts", "file", "alice");
+  let calls = 0;
+  ws.setLeaseFence(async () => { calls++; });
+  ws.setWriteFence(async () => { calls++; });
+  expect(await ws.releaseSafely("a.ts", "bob")).toBeNull();
+  expect(await ws.acquireSafely("a.ts", "file", "bob")).toMatchObject({ ok: false });
+  expect(await ws.acquireSafely("a.ts", "file", "alice")).toMatchObject({ ok: true, created: false });
+  expect(await ws.acquireRunSafely(["a.ts"], "bob", "run")).toMatchObject({ ok: false });
+  expect(await ws.releaseRunSafely("unknown")).toEqual([]);
+  expect(await ws.applyOps("a.ts", "bob", 1, [])).toMatchObject({ ok: false });
+  expect(await ws.applyOps("a.ts", "alice", 0, [])).toMatchObject({ ok: false });
+  expect(calls).toBe(0);
+});

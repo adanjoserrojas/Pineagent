@@ -66,10 +66,19 @@ export class Workspace {
   }
 
   async acquireSafely(path: string, kind: Lock["kind"], userId: string): Promise<AcquireResult> {
+    const held = this.conflict(path, kind, userId);
+    if (held) return { ok: false, code: "HELD", lock: publicLock(held) };
+    const existing = this.locks.get(path);
+    if (existing && !this.expiryReason(existing)) {
+      existing.expiresAt = this.now() + this.timing.leaseMs;
+      return { ok: true, lock: publicLock(existing), created: false };
+    }
     return this.changeLease(() => this.acquire(path, kind, userId));
   }
 
   releaseSafely(path: string, userId: string): Promise<Lock | null> {
+    const lock = this.locks.get(path);
+    if (!lock || lock.holder !== userId || lock.holderType !== "user") return Promise.resolve(null);
     return this.changeLease(() => this.release(path, userId));
   }
 
@@ -79,10 +88,16 @@ export class Workspace {
   }
 
   acquireRunSafely(paths: string[], ownerId: string, runId: string) {
+    for (const path of paths) {
+      const held = [...this.locks.values()].find((l) => !(l.runId === runId && l.holder === ownerId)
+        && (l.path === path || (l.kind === "dir" && path.startsWith(l.path))));
+      if (held) return Promise.resolve({ ok: false as const, lock: publicLock(held) });
+    }
     return this.changeLease(() => this.acquireForRun(paths, ownerId, runId));
   }
 
   releaseRunSafely(runId: string): Promise<Lock[]> {
+    if (![...this.locks.values()].some((l) => l.runId === runId)) return Promise.resolve([]);
     return this.changeLease(() => this.releaseRun(runId));
   }
 
@@ -279,12 +294,17 @@ export class Workspace {
   }
 
   async applyOps(path: string, userId: string, baseVersion: number, ops: Op[], runId?: string): Promise<OpsResult> {
-    await this.writeFence?.(path);
     while (this.gate && (this.gate.paths === "all" || this.gate.paths.has(path))) await this.gate.open;
     const write = (this.writes.get(path) ?? Promise.resolve()).catch(() => {}).then(async (): Promise<OpsResult> => {
       const file = await this.read(path);
       const full = this.resolvePath(path);
       if (!file || !full || !(await this.inside(full, true))) return { ok: false, code: "NOT_HOLDER", currentVersion: file?.version ?? 0 };
+      const before = runId ? this.runLock(path, runId) : this.coveringLock(path, userId);
+      if (!before || before.holder !== userId || before.expiresAt <= this.now()) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
+      if (baseVersion !== file.version || !Array.isArray(ops) || applyOps(file.content, ops) === null) return { ok: false, code: "STALE", currentVersion: file.version };
+      // Registered in writes before any await: a container launch under freeze
+      // must drain this operation. Unauthorized attempts never reach the fence.
+      await this.writeFence?.(path);
       const handle = await openFile(full, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
       try {
         const info = await handle.stat();
@@ -297,7 +317,7 @@ export class Workspace {
         const temporary = `${full}.pineagent-${randomUUID()}`;
         try {
           const staged = await openFile(temporary, "wx", 0o600);
-          try { await staged.writeFile(next, "utf8"); await staged.sync(); await staged.chmod(info.mode & 0o666); }
+          try { await staged.writeFile(next, "utf8"); await staged.sync(); await staged.chmod(info.mode & 0o777); }
           finally { await staged.close(); }
           // Preserve the existing restart fence: reserve the next persisted
           // version first. In-memory state changes only after the disk succeeds.

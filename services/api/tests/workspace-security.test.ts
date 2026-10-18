@@ -1,10 +1,20 @@
-import { mkdtemp, mkdir, writeFile, link, readFile, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, link, readFile, symlink, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Workspace } from "@pineagent/core/server";
 
 describe("workspace write authority", () => {
+  it.skipIf(process.platform === "win32")("preserves executable permissions when replacing file content", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pineagent-security-"));
+    const script = join(root, "check.sh");
+    await writeFile(script, "echo old");
+    await chmod(script, 0o755);
+    const ws = new Workspace(root, { leaseMs: 30_000, idleMs: 600_000 });
+    ws.acquire("check.sh", "file", "alice");
+    expect(await ws.applyOps("check.sh", "alice", 1, [{ offset: 5, length: 3, text: "new" }])).toMatchObject({ ok: true });
+    expect((await stat(script)).mode & 0o777).toBe(0o755);
+  });
   it("does not allow a hardlink alias to become a second writer", async () => {
     const root = await mkdtemp(join(tmpdir(), "pineagent-security-"));
     await writeFile(join(root, "original.ts"), "original");
