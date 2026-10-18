@@ -24,9 +24,10 @@
   color-scheme: dark;
 }
 
-.workspace-terminal { flex: 0 0 240px; min-height: 140px; min-width: 0; border-top: 1px solid var(--line); background: var(--ground); overflow: hidden; }
+.workspace-terminal { flex: 0 0 320px; max-height: 55vh; min-height: 140px; min-width: 0; border-top: 1px solid var(--line); background: var(--ground); overflow: hidden; }
 .terminal-surface { height: calc(100% - 32px); padding: 6px 10px; }
 .workspace-terminal .panel-controls { height: 32px; }
+.workspace-terminal [role="status"] { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--ground); color: var(--text); font: 14px/1.45 var(--sans); }
 button { font: inherit; }

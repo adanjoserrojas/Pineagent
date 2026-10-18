@@ -1,61 +1,79 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { WorkspaceSocket } from "../net/socket";
 import "@xterm/xterm/css/xterm.css";
 
-// Server/repository strings are text, never executable terminal escape sequences.
-const safe = (text: string) => text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "").replace(/\n/g, "\r\n");
-
 export function WorkspaceTerminal({ socket, onClose }: { socket: WorkspaceSocket; onClose(): void }) {
   const element = useRef<HTMLDivElement>(null);
+  const [attempt, retry] = useState(0);
+  const [status, setStatus] = useState("Connecting…");
   useEffect(() => {
     if (!element.current) return;
     const colors = getComputedStyle(element.current);
-    const terminal = new Terminal({ convertEol: true, cursorBlink: false, screenReaderMode: true, scrollback: 500,
+    const terminal = new Terminal({ cursorBlink: false, screenReaderMode: true, scrollback: 500,
       fontSize: 12, fontFamily: colors.getPropertyValue("--mono"),
       theme: { background: colors.getPropertyValue("--ground").trim(), foreground: colors.getPropertyValue("--text").trim() } });
-    const fit = new FitAddon();
-    terminal.loadAddon(fit); terminal.open(element.current);
-    const resize = new ResizeObserver(() => { if (element.current?.clientWidth) fit.fit(); });
-    resize.observe(element.current); fit.fit();
-    terminal.writeln("Pineagent Rust CLI · isolated command mode (not a system shell)");
-    terminal.writeln("run TASK | runs | read PATH | lock/unlock PATH | pause/resume ID");
-    terminal.writeln("approve ID CANDIDATE | reject ID HINT | git-status");
-    let line = "", busy = false, disposed = false;
-    const prompt = () => terminal.write("\r\n> ");
-    prompt();
+    const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(element.current);
+    // Preserve Ratatui screen controls, but never permit clipboard writes.
+    const clipboard = terminal.parser.registerOscHandler(52, () => true);
+    let id: string | null = null, disposed = false, inputPending = "", sending = false;
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    const stop = (message: string) => {
+      const previous = id; id = null; inputPending = "";
+      if (previous && socket.connected) socket.emit("terminal:close", { id: previous }, () => {});
+      if (!disposed) setStatus(message);
+    };
+    const flush = async () => {
+      if (sending || !id || !inputPending || !socket.connected) return;
+      sending = true;
+      try {
+        while (id && inputPending && !disposed) {
+          const data = inputPending; inputPending = "";
+          const result = await socket.timeout(5000).emitWithAck("terminal:input", { id, data });
+          if (!result.ok) throw new Error("Input refused");
+        }
+      } catch { stop("Input outcome unknown. Reopen to inspect; input is never replayed."); }
+      finally { sending = false; }
+    };
     const input = terminal.onData(data => {
-      if (busy || !socket.connected) return;
-      // Ignore cursor/control escape sequences; paste cannot execute multiple commands.
-      if (data.includes("\x1b")) return;
-      if (data === "\r") {
-        if (!line.trim()) return;
-        const command = line; line = ""; busy = true; terminal.write("\r\n");
-        socket.timeout(160_000).emit("terminal:command", { line: command }, (error, response) => {
-          if (disposed) return;
-          busy = false;
-          terminal.write(safe(error ? "Command outcome unknown. Reconnect and inspect before retrying."
-            : response.ok ? JSON.stringify(response.result, null, 2).slice(0, 32_000)
-            : response.code === "NOT_AVAILABLE" ? "Terminal not enabled on this server."
-            : "Command refused. Check command syntax, connection, and workspace permissions."));
-          prompt();
-        });
-      } else if (data === "\x7f") {
-        if (line) { line = [...line].slice(0, -1).join(""); terminal.write("\b \b"); }
-      } else if (data === "\x03") { line = ""; terminal.write("^C"); prompt(); }
-      else {
-        const text = data.replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
-        if (new TextEncoder().encode(line + text).length <= 8000) { line += text; terminal.write(text); }
-      }
+      if (!id || !socket.connected) return;
+      if (new TextEncoder().encode(inputPending + data).length > 8192) return stop("Input limit exceeded. Reopen terminal.");
+      inputPending += data; void flush();
     });
-    const disconnected = () => { if (!disposed) terminal.writeln("\r\nDisconnected. No commands are replayed."); };
-    socket.on("disconnect", disconnected);
-    terminal.focus();
-    return () => { disposed = true; socket.off("disconnect", disconnected); input.dispose(); resize.disconnect(); terminal.dispose(); };
-  }, [socket]);
+    const output = (message: { id: string; data: string }, ack: () => void) => {
+      if (disposed || message.id !== id) { ack(); return; }
+      try { terminal.write(Uint8Array.from(atob(message.data), c => c.charCodeAt(0)), ack); }
+      catch { ack(); stop("Invalid terminal output."); }
+    };
+    const exited = (message: { id: string }) => { if (message.id === id) stop("Terminal ended. Reopen to reconnect."); };
+    const disconnected = () => stop("Disconnected. Reopen after reconnecting; agent runs continue.");
+    socket.on("terminal:output", output); socket.on("terminal:exit", exited); socket.on("disconnect", disconnected);
+    const resize = new ResizeObserver(() => {
+      if (!element.current?.clientWidth) return;
+      fit.fit(); clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (id && socket.connected) socket.timeout(5000).emit("terminal:resize", { id, cols: terminal.cols, rows: terminal.rows }, () => {});
+      }, 150);
+    });
+    resize.observe(element.current); fit.fit(); terminal.focus(); setStatus("Connecting…");
+    if (socket.connected) socket.timeout(150_000).emit("terminal:open", { cols: terminal.cols, rows: terminal.rows }, (error, result) => {
+      if (!error && result.ok) {
+        if (disposed) socket.emit("terminal:close", { id: result.id }, () => {});
+        else { id = result.id; setStatus("Interactive Ratatui"); }
+      } else if (!disposed) setStatus(error ? "Terminal connection timed out. Reopen to retry." : !result.ok && result.code === "NOT_AVAILABLE" ? "Terminal not enabled on this server." : "Terminal refused. Check workspace permissions.");
+    });
+    else setStatus("Disconnected. Reopen after reconnecting.");
+    return () => {
+      disposed = true; stop(""); clearTimeout(resizeTimer);
+      socket.off("terminal:output", output); socket.off("terminal:exit", exited); socket.off("disconnect", disconnected);
+      input.dispose(); clipboard.dispose(); resize.disconnect(); terminal.dispose();
+    };
+  }, [socket, attempt]);
   return <section className="workspace-terminal" aria-label="Workspace terminal">
-    <div className="panel-controls"><span>TERMINAL · RUST CLI</span><button type="button" onClick={onClose} aria-label="Close terminal">×</button></div>
+    <div className="panel-controls"><span>TERMINAL · RATATUI</span><span role="status">{status}</span>
+      <button type="button" onClick={() => retry(value => value + 1)}>Reopen</button>
+      <button type="button" onClick={onClose} aria-label="Close terminal">×</button></div>
     <div ref={element} className="terminal-surface" />
   </section>;
 }
