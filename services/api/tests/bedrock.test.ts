@@ -3,6 +3,26 @@ import { OpusRun, OPUS_MODEL, type ModelTransport } from "../src/models/bedrock"
 import { contentHash } from "@pineagent/harness";
 
 describe("bounded Opus model gateway", () => {
+  it.each(["", "   ", "x".repeat(12001), "unsafe\u0000answer"])("rejects empty, oversized or control-character answers", async text => {
+    const run = new OpusRun({ runId: "r", ownerId: "alice", transport: async () => ({
+      $metadata: {}, stream: (async function* () {
+        yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text } } };
+        yield { messageStop: { stopReason: "end_turn" } };
+      })(),
+    }) });
+    await expect(run.answer({ task: "question", evidence: "" })).rejects.toMatchObject({ code: "MODEL_INVALID_ANSWER" });
+  });
+  it("does not expose reasoning or accept incomplete read-only answers", async () => {
+    const run = new OpusRun({ runId: "r", ownerId: "alice", transport: async () => ({
+      $metadata: {}, stream: (async function* () {
+        yield { contentBlockDelta: { contentBlockIndex: 0, delta: { reasoningContent: { text: "PRIVATE_REASONING" } } } };
+        yield { contentBlockDelta: { contentBlockIndex: 1, delta: { text: "partial answer" } } };
+        yield { messageStop: { stopReason: "max_tokens" } };
+      })(),
+    }) });
+    await expect(run.answer({ task: "question", evidence: "" })).rejects.toMatchObject({ code: "MODEL_INCOMPLETE" });
+    expect(JSON.stringify(run.receipts())).not.toContain("PRIVATE_REASONING");
+  });
   it("enforces a cumulative input budget before another provider request", async () => {
     let calls = 0;
     const run = new OpusRun({ runId: "budget", ownerId: "alice", maxCalls: 8, maxInputChars: 5000, transport: async () => {

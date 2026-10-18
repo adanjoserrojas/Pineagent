@@ -116,7 +116,7 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) start(e);
           }}
         />
-        <p className="run-note">{mode === "ask" ? "Reads a bounded file sample. No changes or commands." : "Edits existing JavaScript/Python source and verifies with existing tests. May need your approval."}</p>
+        <p className="run-note">{mode === "ask" ? "Reads a bounded file sample. No changes or commands." : "Builds bounded JavaScript/Python features with new files and tests. Preserves existing tests. May need your approval."}</p>
         {DEV_TOOLS && (
           <p className="run-hint">
             Mock agent: include <code>unsure</code>, <code>backup</code>, <code>fallback</code>, <code>recover</code> or <code>fail</code>, or a file name like <code>db.ts</code>.
