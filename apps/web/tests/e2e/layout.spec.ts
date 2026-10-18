@@ -1,0 +1,77 @@
+import { expect, test } from "@playwright/test";
+import { home } from "./rooms";
+
+test("panels resize with pointer and keyboard, collapse, restore, and persist", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto(home("alice"));
+  await expect(page.getByTestId("connection")).toHaveText("Connected");
+  const explorer = page.getByRole("separator", { name: "Resize explorer" });
+  const box = (await explorer.boundingBox())!;
+  await page.mouse.move(box.x + 3, box.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 63, box.y + 80);
+  await page.mouse.up();
+  await expect(explorer).toHaveAttribute("aria-valuenow", "304");
+  await explorer.press("ArrowRight");
+  await expect(explorer).toHaveAttribute("aria-valuenow", "314");
+  const agents = page.getByRole("separator", { name: "Resize agents" });
+  await agents.press("ArrowLeft");
+  await expect(agents).toHaveAttribute("aria-valuenow", "342");
+  await page.getByLabel("Ask your agent").fill("Keep this draft");
+  await page.getByRole("button", { name: "Collapse agents", exact: true }).click();
+  await expect(page.getByRole("complementary", { name: "Agent runs" })).toBeHidden();
+  await page.getByRole("button", { name: "Show agents" }).click();
+  await expect(page.getByLabel("Ask your agent")).toHaveValue("Keep this draft");
+  await page.getByRole("button", { name: "Collapse explorer" }).click();
+  await expect(page.getByRole("navigation", { name: "Explorer", exact: true })).toBeHidden();
+  await page.getByRole("button", { name: "Show files" }).click();
+  await expect(explorer).toHaveAttribute("aria-valuenow", "314");
+  const activity = page.getByRole("separator", { name: "Resize activity" });
+  await activity.press("ArrowUp");
+  await expect(activity).toHaveAttribute("aria-valuenow", "160");
+  await page.getByRole("button", { name: "Collapse activity" }).click();
+  await expect(page.getByRole("region", { name: "Branch activity" })).toBeHidden();
+  await page.reload();
+  await expect(explorer).toHaveAttribute("aria-valuenow", "314");
+  await expect(agents).toHaveAttribute("aria-valuenow", "342");
+  await expect(page.getByRole("region", { name: "Branch activity" })).toBeHidden();
+  await page.getByRole("button", { name: "Reset panel layout" }).click();
+  await expect(activity).toHaveAttribute("aria-valuenow", "150");
+  await expect(explorer).toHaveAttribute("aria-valuenow", "244");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/crown-layout.png" });
+});
+
+test("an individual agent run collapses without losing its approval draft", async ({ page }) => {
+  await page.goto(home("alice"));
+  await expect(page.getByTestId("connection")).toHaveText("Connected");
+  await page.getByLabel("Ask your agent").fill("unsure update db.ts");
+  await page.getByRole("button", { name: "Start run" }).click();
+  await expect(page.getByTestId("run-state")).toHaveText("needs a choice");
+  await page.getByLabel("None of these").check();
+  const hint = page.getByRole("textbox", { name: "What should it do instead?" });
+  await hint.fill("Keep the existing interface");
+  await page.getByRole("button", { name: /^Collapse run/ }).click();
+  await expect(hint).toBeHidden();
+  await expect(page.getByTestId("run-state")).toHaveText("needs a choice");
+  await page.getByRole("button", { name: /^Expand run/ }).click();
+  await expect(hint).toHaveValue("Keep the existing interface");
+});
+
+test("remembered widths respect minimum sizes at the desktop breakpoint", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("pineagent:crown-layout:v1", JSON.stringify({ explorer: 520, agents: 240 })));
+  await page.setViewportSize({ width: 901, height: 900 });
+  await page.goto(home("alice"));
+  const explorer = page.getByRole("separator", { name: "Resize explorer" });
+  const agents = page.getByRole("separator", { name: "Resize agents" });
+  await expect(explorer).toHaveAttribute("aria-valuenow", "241");
+  await expect(agents).toHaveAttribute("aria-valuenow", "240");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/crown-tablet.png" });
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await expect(explorer).toHaveAttribute("aria-valuenow", "520");
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.getByRole("button", { name: "Show agents" }).click();
+  await expect(page.getByRole("button", { name: "Show agents" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Show files" })).toHaveAttribute("aria-pressed", "false");
+});

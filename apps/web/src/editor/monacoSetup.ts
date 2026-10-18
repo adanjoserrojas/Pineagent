@@ -17,9 +17,11 @@ self.MonacoEnvironment = {
   },
 };
 loader.config({ monaco });
+// Monaco measures glyphs once; refresh after the local variable font is ready.
+void document.fonts.load("14px 'Recursive Mono'").then(() => monaco.editor.remeasureFonts()).catch(() => {});
 
-// Only the open file is a model, so cross-file imports would all show as errors. Keep syntax
-// checks, drop semantic ones until the editor knows about the whole repo.
+// Only visible files have models, so imports outside the editor groups would show errors.
+// Keep syntax checks, drop semantic ones until the editor knows about the whole repo.
 monaco.typescript.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true });
 monaco.typescript.javascriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true });
 

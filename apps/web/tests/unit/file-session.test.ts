@@ -289,6 +289,53 @@ describe("reconnect (F3, F4)", () => {
 });
 
 describe("leaving", () => {
+  it("split views mirror a local edit once, share its lease, and detach independently", async () => {
+    const first = { text: "" };
+    const second = { text: "" };
+    const view = (buffer: { text: string }) => ({
+      replace: (text: string) => { buffer.text = text; },
+      apply: (ops: Op[]) => { buffer.text = applyOps(buffer.text, ops)!; },
+    });
+    const source = view(first);
+    const detachFirst = alice.session.attachView(source);
+    const detachSecond = alice.session.attachView(view(second));
+    const ops = insert(0, "split ");
+    first.text = applyOps(first.text, ops)!;
+    alice.session.localEdit(ops, source);
+    expect(first.text).toBe("split " + original);
+    expect(second.text).toBe(first.text);
+    await settleAll();
+    await flushAll();
+    expect(await serverText()).toBe(first.text);
+    expect(alice.sent).toBe(1);
+    detachSecond();
+    const more = insert(0, "again ");
+    first.text = applyOps(first.text, more)!;
+    alice.session.localEdit(more, source);
+    await flushAll();
+    expect(await serverText()).toBe(first.text);
+    expect(second.text).toBe("split " + original);
+    expect(ws.allLocks()).toHaveLength(1);
+    detachFirst();
+  });
+
+  it("all split views recover when an optimistic write is rejected", async () => {
+    type(alice, insert(0, "owned "));
+    await settleAll();
+    await flushAll();
+    const first = { text: "" };
+    const second = { text: "" };
+    const source = { replace: (text: string) => { first.text = text; }, apply: (ops: Op[]) => { first.text = applyOps(first.text, ops)!; } };
+    const detach = bob.session.attachView(source);
+    const detachOther = bob.session.attachView({ replace: (text) => { second.text = text; }, apply: (ops) => { second.text = applyOps(second.text, ops)!; } });
+    first.text = "rejected " + first.text;
+    bob.session.localEdit(insert(0, "rejected "), source);
+    expect(first.text).toBe(second.text);
+    expect(first.text).toBe(await serverText());
+    expect(bob.sent).toBe(0);
+    detach(); detachOther();
+  });
+
   it("leaving a file flushes the last edits, then releases the lock", async () => {
     type(alice, insert(0, "last words "));
     await settleAll();
