@@ -1,0 +1,14 @@
+[
+  {
+    "taskId": "chunk",
+    "bugExitCode": 1,
+    "goldExitCode": 0,
+    "passed": true
+  },
+  {
+    "taskId": "uniqueBy",
+    "bugExitCode": 1,
+    "goldExitCode": 0,
+    "passed": true
+  }
+]

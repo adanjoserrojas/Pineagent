@@ -1,0 +1,7 @@
+{
+  "name": "pineagent-codex-testbench",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "test": "node --test test/*.test.mjs", "calibrate": "node src/calibrate.mjs", "run": "node src/run.mjs", "report": "node src/report.mjs" }
+}
