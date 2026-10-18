@@ -166,6 +166,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
           onClick={openCommit}
         />
         <span className="who">{ws.self?.name ?? session.displayName}</span>
+        <button type="button" className="topbar-btn" onClick={session.signOut} title={`Log out of Pineagent as ${session.displayName}`}>Log out</button>
       </header>
       {socket && (
         <CommitDialog
