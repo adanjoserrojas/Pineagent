@@ -5,13 +5,15 @@ export type TreeNode = { name: string; path: string; kind: "file" | "dir"; child
 export type Row = { node: TreeNode; depth: number };
 export type Match = { path: string; start: number; end: number };
 
+// `paths` are files, plus "dir/" entries for folders with nothing in them yet.
 export function buildTree(paths: string[]): TreeNode[] {
   const root: TreeNode = { name: "", path: "", kind: "dir", children: [] };
   for (const path of paths) {
-    const parts = path.split("/");
+    const isDir = path.endsWith("/");
+    const parts = (isDir ? path.slice(0, -1) : path).split("/");
     let dir = root;
     parts.forEach((name, i) => {
-      if (i === parts.length - 1) {
+      if (i === parts.length - 1 && !isDir) {
         dir.children.push({ name, path, kind: "file", children: [] });
         return;
       }

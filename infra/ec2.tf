@@ -43,11 +43,12 @@ resource "aws_instance" "app" {
   # Runs once, on first boot (cloud-init). Changing it builds a fresh instance; the data volume
   # is reattached, so the repos survive.
   user_data = templatefile("${path.module}/bootstrap.sh.tftpl", {
-    data_volume_id = aws_ebs_volume.workspaces.id
-    domain_name    = var.domain_name
-    caddy_version  = "2.11.7"
-    release_bucket = aws_s3_bucket.releases.bucket
-    region         = var.region
+    data_volume_id   = aws_ebs_volume.workspaces.id
+    domain_name      = var.domain_name
+    redirect_domains = var.redirect_domains
+    caddy_version    = "2.11.7"
+    release_bucket   = aws_s3_bucket.releases.bucket
+    region           = var.region
   })
   user_data_replace_on_change = true
 
@@ -62,4 +63,6 @@ resource "aws_volume_attachment" "workspaces" {
   device_name = "/dev/sdf" # a request; Nitro instances expose it as an NVMe disk (see bootstrap)
   volume_id   = aws_ebs_volume.workspaces.id
   instance_id = aws_instance.app.id
+  # When the instance is replaced, stop it first: detaching a disk that is still mounted can hang.
+  stop_instance_before_detaching = true
 }

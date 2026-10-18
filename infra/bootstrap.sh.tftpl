@@ -201,6 +201,14 @@ ${domain_name} {
 		file_server
 	}
 }
+
+# Other names send people to the one origin the app and Auth0 are set up for. Temporary (302), so
+# browsers don't cache it if a name later gets its own use.
+%{ for name in redirect_domains ~}
+${name} {
+	redir https://${domain_name}{uri}
+}
+%{ endfor ~}
 CADDY
 
 cat > /etc/systemd/system/caddy.service <<'UNIT'

@@ -1,8 +1,8 @@
 // One branch's shared state: its files, their versions, and the lock table.
 // No sockets here, so the rules can be unit-tested with a fake clock.
-import { readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
-import type { Lock, LockChangeReason, Op } from "../contracts";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
+import type { Lock, LockChangeReason, Op, TreeCreateAck } from "../contracts";
 import { applyOps } from "../ops";
 import type { RoomStore } from "./store";
 
@@ -13,6 +13,23 @@ export type ReadResult = FileState | { unsupported: "binary" | "too_large" } | n
 
 // Bigger files aren't opened in the editor: every viewer holds the whole text.
 export const MAX_FILE_BYTES = 1_000_000;
+
+// PROPOSED image viewing: read-only, sent as base64 in one ack, so the cap is on the file size.
+export const MAX_IMAGE_BYTES = 2_000_000;
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  ico: "image/x-icon",
+  bmp: "image/bmp",
+  avif: "image/avif",
+};
+export type ImageResult =
+  | { ok: true; mime: string; data: string; bytes: number }
+  | { ok: false; code: "NOT_FOUND" | "UNSUPPORTED" | "TOO_LARGE" };
 
 export type AcquireResult = { ok: true; lock: Lock; created: boolean } | { ok: false; code: "HELD"; lock: Lock };
 export type OpsResult = { ok: true; version: number } | { ok: false; code: "NOT_HOLDER" | "STALE"; currentVersion: number };
@@ -87,9 +104,11 @@ export class Workspace {
 
   // Repo-relative path → absolute path inside root, or null if it escapes the workspace.
   resolvePath(path: unknown): string | null {
-    if (typeof path !== "string" || path === "" || path.startsWith("/") || path.includes("\0")) return null;
-    // Git's own files are never readable or editable through the workspace.
-    if (path.split(/[\\/]/).includes(".git")) return null;
+    // Wire paths have exactly one spelling on every host. In particular, do not
+    // resolve aliases and then key locks/versions by the unnormalized input.
+    if (typeof path !== "string" || /[\\:\x00-\x1f\x7f]/.test(path)) return null;
+    const parts = path.split("/");
+    if (parts.some((p) => !p || p === "." || p === ".." || /[. ]$/.test(p) || p.toLowerCase() === ".git" || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p))) return null;
     const full = resolve(this.root, path);
     return full.startsWith(this.root + sep) ? full : null;
   }
@@ -113,6 +132,8 @@ export class Workspace {
   }
 
   acquire(path: string, kind: Lock["kind"], userId: string): AcquireResult {
+    const target = kind === "dir" && path.endsWith("/") ? path.slice(0, -1) : path;
+    if (!this.resolvePath(target) || (kind === "dir" && !path.endsWith("/"))) throw new Error("Noncanonical workspace path");
     const held = this.conflict(path, kind, userId);
     if (held) return { ok: false, code: "HELD", lock: publicLock(held) };
     const now = this.now();
@@ -202,6 +223,24 @@ export class Workspace {
     }
   }
 
+  // An image file's bytes for the read-only viewer. Same path safety as open(); never cached,
+  // since the viewer doesn't edit and Git operations can replace the file at any time.
+  async image(path: string): Promise<ImageResult> {
+    const full = this.resolvePath(path);
+    if (!full || !(await this.inside(full))) return { ok: false, code: "NOT_FOUND" };
+    try {
+      const info = await stat(full);
+      if (!info.isFile()) return { ok: false, code: "NOT_FOUND" };
+      const mime = IMAGE_MIME[(path.split(".").pop() ?? "").toLowerCase()];
+      if (!path.includes(".") || !mime) return { ok: false, code: "UNSUPPORTED" };
+      if (info.size > MAX_IMAGE_BYTES) return { ok: false, code: "TOO_LARGE" };
+      const bytes = await readFile(full);
+      return { ok: true, mime, data: bytes.toString("base64"), bytes: bytes.length };
+    } catch {
+      return { ok: false, code: "NOT_FOUND" };
+    }
+  }
+
   // Accepted only from the lock holder, built on the current version, with ops that fit the text.
   // With `runId`, the edit is that agent run's and must hold the run's own lock; it still counts
   // as the owner's edit for commit ownership.
@@ -217,7 +256,7 @@ export class Workspace {
     while (this.gate && (this.gate.paths === "all" || this.gate.paths.has(path))) await this.gate.open;
     if (!file) return { ok: false, code: "NOT_HOLDER", currentVersion: 0 };
     const lock = runId ? this.runLock(path, runId) : this.coveringLock(path, userId);
-    if (!lock) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
+    if (!lock || lock.holder !== userId || lock.expiresAt <= this.now()) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
     if (baseVersion !== file.version || !Array.isArray(ops)) return { ok: false, code: "STALE", currentVersion: file.version };
     const next = applyOps(file.content, ops);
     if (next === null || Buffer.byteLength(next) > MAX_FILE_BYTES) return { ok: false, code: "STALE", currentVersion: file.version };
@@ -239,15 +278,50 @@ export class Workspace {
     return { ok: true, version };
   }
 
+  // A new empty file or folder (`kind: "dir"`, any trailing "/" optional), with missing parent
+  // folders made on the way. The creator counts as the file's editor, so it's theirs to commit.
+  async create(path: string, kind: "file" | "dir", userId: string): Promise<TreeCreateAck> {
+    const bare = typeof path === "string" ? path.replace(/\/+$/, "") : "";
+    const segments = bare.split("/");
+    const full = this.resolvePath(bare);
+    if (!full || segments.some((s) => s === "" || s === "." || s === "..") || bare.length > 400) return { ok: false, code: "INVALID" };
+    const name = kind === "dir" ? `${bare}/` : bare;
+    while (this.gate?.paths === "all") await this.gate.open; // a rebase is rewriting the tree
+    if (this.conflict(name, "file", userId)) return { ok: false, code: "LOCKED" };
+    // The nearest folder that already exists must really be inside the workspace (not a symlink
+    // out of it), or mkdir would create folders wherever that link points.
+    let existing = dirname(full);
+    while (!(await stat(existing).then(() => true, () => false))) existing = dirname(existing);
+    if (existing !== this.root && !(await this.inside(existing))) return { ok: false, code: "INVALID" };
+    try {
+      await mkdir(dirname(full), { recursive: true });
+      if (kind === "dir") await mkdir(full);
+      else await writeFile(full, "", { encoding: "utf8", flag: "wx" });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      return { ok: false, code: code === "EEXIST" || code === "ENOTDIR" ? "EXISTS" : "INVALID" };
+    }
+    if (kind === "file") {
+      // A path that held a file before (deleted, or known from before a restart) continues its
+      // version, so nobody's old snapshot matches the new empty text.
+      const version = (this.files.get(bare)?.version ?? this.restoredVersions.get(bare) ?? 0) + 1;
+      this.files.set(bare, { content: "", version });
+      this.editors.set(bare, new Set([...(this.editors.get(bare) ?? []), userId]));
+      await this.save(`file:${bare}`, "saveFile", (s) => s.saveFile(bare, version, userId));
+    }
+    return { ok: true, path: name };
+  }
+
   // --- Agent run locks (the harness keeps them alive, so they never expire) -------------------
 
   // All-or-nothing, like the real harness's DynamoDB transaction: either every path is locked for
   // the run or none is, and the first conflicting lock is returned. The owner's own editor lock
   // conflicts too; their agent waits until they let go of the file.
   acquireForRun(paths: string[], ownerId: string, runId: string): { ok: true; locks: Lock[] } | { ok: false; lock: Lock } {
+    if (!paths.every((p) => this.resolvePath(p))) throw new Error("Noncanonical workspace path");
     for (const path of paths) {
       for (const l of this.locks.values()) {
-        if (l.runId === runId) continue;
+        if (l.runId === runId && l.holder === ownerId) continue;
         const above = l.kind === "dir" && path.startsWith(l.path);
         if (l.path === path || above) return { ok: false, lock: publicLock(l) };
       }

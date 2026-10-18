@@ -30,6 +30,17 @@ describe("buildTree", () => {
   });
 });
 
+describe("empty folders", () => {
+  it("shows a \"dir/\" entry as a folder with nothing in it", () => {
+    const roots = buildTree(["docs/notes/", "docs/readme.md", "empty/"]);
+    expect(roots.map((n) => [n.path, n.kind, n.children.length])).toEqual([
+      ["docs/", "dir", 2],
+      ["empty/", "dir", 0],
+    ]);
+    expect(roots[0].children.map((n) => n.path)).toEqual(["docs/notes/", "docs/readme.md"]);
+  });
+});
+
 describe("helpers", () => {
   it("finds parent directories", () => {
     expect(parentDir("src/routes/users.ts")).toBe("src/routes/");

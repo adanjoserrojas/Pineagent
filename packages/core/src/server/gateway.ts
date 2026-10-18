@@ -223,12 +223,13 @@ export function createGateway(opts: GatewayOptions) {
       socket.data.room = room;
       await socket.join(room);
       const self: Member = { userId: user.id, name: user.name, avatarUrl: user.avatarUrl, openPath: socket.data.openPath };
+      const files = await r.repo.listFiles();
       ack({
         ok: true,
         self,
         members: await membersOf(room),
         locks: r.ws.allLocks(),
-        tree: await r.repo.listFiles(),
+        tree: [...files, ...(await r.repo.listEmptyDirs(files))].sort(),
         timing: { heartbeatMs, leaseMs },
       });
       socket.to(room).emit("presence:changed", { ...presenceOf(user), status: "joined", openPath: self.openPath });
@@ -245,11 +246,18 @@ export function createGateway(opts: GatewayOptions) {
       ack({ ok: true, path, version: file.version, content: file.content, hash });
     });
 
+    socket.on("file:image", async ({ path }, ack) => {
+      const j = await joined();
+      if (!j || typeof path !== "string") return ack({ ok: false, code: "NOT_FOUND" });
+      const res = await j.ws.image(path);
+      ack(res.ok ? { ...res, path } : res);
+    });
+
     socket.on("lock:acquire", async ({ path, kind }, ack) => {
       const j = await joined();
       const target = kind === "dir" && typeof path === "string" && path.endsWith("/") ? path.slice(0, -1) : path;
       // Malformed requests get no ack; the client's timeout handles it.
-      if (!j || (kind !== "file" && kind !== "dir") || !j.ws.resolvePath(target)) return;
+      if (!j || (kind !== "file" && kind !== "dir") || !j.ws.resolvePath(target) || (kind === "dir" && !path.endsWith("/"))) return;
       const res = j.ws.acquire(path, kind, user.id);
       await j.ws.lockSaved(path); // written through before the ack (contract rule 5)
       if (res.ok) {
@@ -289,6 +297,17 @@ export function createGateway(opts: GatewayOptions) {
         socket.to(j.room).emit("file:changed", { path, version: res.version, ops, author: user.id, source: "editor" });
         j.changes.poke();
       }
+    });
+
+    socket.on("tree:create", async ({ path, kind }, ack) => {
+      const j = await joined();
+      if (!j || (kind !== "file" && kind !== "dir")) return ack({ ok: false, code: "INVALID" });
+      const res = await j.ws.create(path, kind, user.id);
+      ack(res);
+      if (!res.ok) return;
+      log("tree.created", { room: j.room, user: user.id, kind });
+      io.to(j.room).emit("tree:changed", { path: res.path, change: "add" });
+      j.changes.poke();
     });
 
     socket.on("run:start", async ({ task }, ack) => {

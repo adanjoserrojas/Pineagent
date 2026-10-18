@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { openFile } from "./rooms";
 import { startMock, type MockOptions } from "../../mock/server";
 
 // The run panel and the plant against the mock harness (contracts/RUN_EVENTS.md).
@@ -64,7 +65,7 @@ test("a run goes planning → routing → executing → done, and the plant foll
 
 test("the agent locks its file: the owner's editor is read-only until it finishes, and the edit is theirs to commit", async ({ browser }) => {
   const alice = await joinAs(browser, "alice", { runStepMs: 400 });
-  await alice.locator('[data-path="src/auth.ts"]').click();
+  await openFile(alice, "src/auth.ts");
   await expect(alice.getByTestId("editor-status")).toContainText("Viewing");
   await startRun(alice, "tidy auth.ts");
 
@@ -78,7 +79,7 @@ test("the agent locks its file: the owner's editor is read-only until it finishe
     /^\/\/ alice's agent: tidy auth\.ts\r?\n/,
   );
 
-  await alice.getByRole("button", { name: "Commit…" }).click();
+  await alice.getByRole("button", { name: /^Commit, / }).click();
   await expect(alice.getByRole("dialog").getByRole("checkbox", { name: /src\/auth\.ts/ })).toBeChecked();
 });
 
@@ -131,7 +132,7 @@ test("a failing step shows the error on the card and the plant", async ({ browse
 
 test("Pause agent from the editor gives the file back; Resume finishes the run", async ({ browser }) => {
   const alice = await joinAs(browser, "alice", { runStepMs: 500 });
-  await alice.locator('[data-path="src/auth.ts"]').click();
+  await openFile(alice, "src/auth.ts");
   await expect(alice.getByTestId("editor-status")).toContainText("Viewing");
   await startRun(alice, "slow change to auth.ts");
   await expect(alice.getByRole("button", { name: "Pause agent" })).toBeVisible();

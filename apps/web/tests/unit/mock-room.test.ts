@@ -162,6 +162,30 @@ describe("mock handshake and room:join", () => {
     expect(await seen).toEqual([{ path: "notes.md", status: "A" }]);
   });
 
+  it("creates files and folders for everyone, and the creator owns a new file", async () => {
+    const a = client("dev:xia");
+    const b = client("dev:yan");
+    await Promise.all([connected(a), connected(b)]);
+    await a.emitWithAck("room:join", { wsId: "w9", branch: "main" });
+    await b.emitWithAck("room:join", { wsId: "w9", branch: "main" });
+
+    const seen = new Promise((r) => b.once("tree:changed", r));
+    expect(await a.emitWithAck("tree:create", { path: "src/new/thing.ts", kind: "file" })).toEqual({ ok: true, path: "src/new/thing.ts" });
+    expect(await seen).toEqual({ path: "src/new/thing.ts", change: "add" });
+    const status = await a.emitWithAck("git:status", {});
+    expect(status.changes.find((c) => c.path === "src/new/thing.ts")).toMatchObject({ editors: ["dev|xia"], committable: true });
+    expect((await b.emitWithAck("git:status", {})).changes.find((c) => c.path === "src/new/thing.ts")).toMatchObject({ committable: false });
+
+    expect(await b.emitWithAck("tree:create", { path: "assets", kind: "dir" })).toEqual({ ok: true, path: "assets/" });
+    expect(await b.emitWithAck("tree:create", { path: "../x", kind: "file" })).toEqual({ ok: false, code: "INVALID" });
+
+    // Git doesn't track empty folders, so a later join is told about it separately.
+    const c = client("dev:zed");
+    await connected(c);
+    const joined = await c.emitWithAck("room:join", { wsId: "w9", branch: "main" });
+    expect(joined.ok && joined.tree).toEqual(expect.arrayContaining(["assets/", "src/new/thing.ts"]));
+  });
+
   it("answers UNSUPPORTED for a binary file, and run:start says no harness is plugged in only when there isn't one", async () => {
     const a = client("dev:wes");
     await connected(a);
@@ -170,6 +194,18 @@ describe("mock handshake and room:join", () => {
     await writeFile(join(room.ws.root, "logo.png"), Buffer.from([0x89, 0x50, 0x00, 0x47]));
     expect(await a.emitWithAck("file:snapshot", { path: "logo.png" })).toEqual({ ok: false, code: "UNSUPPORTED", reason: "binary" });
     expect(await a.emitWithAck("run:start", { task: "  " })).toEqual({ ok: false, code: "BAD_REQUEST" });
+  });
+
+  it("serves images over file:image only to joined clients, and refuses other files", async () => {
+    const a = client("dev:ned");
+    await connected(a);
+    expect(await a.emitWithAck("file:image", { path: "images/logo.png" })).toEqual({ ok: false, code: "NOT_FOUND" }); // not joined
+    await a.emitWithAck("room:join", { wsId: "w10", branch: "main" });
+    const res = await a.emitWithAck("file:image", { path: "images/logo.png" });
+    expect(res).toMatchObject({ ok: true, path: "images/logo.png", mime: "image/png" });
+    expect(res.ok && Buffer.from(res.data, "base64").length).toBe(res.ok && res.bytes);
+    expect(await a.emitWithAck("file:image", { path: "src/auth.ts" })).toEqual({ ok: false, code: "UNSUPPORTED" });
+    expect(await a.emitWithAck("file:image", { path: "nope.png" })).toEqual({ ok: false, code: "NOT_FOUND" });
   });
 
   it("refuses malformed workspace and branch names", async () => {
