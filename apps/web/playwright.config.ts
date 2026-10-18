@@ -12,7 +12,8 @@ export default defineConfig({
   // Several browsers loading Monaco cold from the Vite dev server can take longer than the 5 s default.
   expect: { timeout: 10_000 },
   use: { baseURL: `http://localhost:${WEB_PORT}`, trace: "retain-on-failure" },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // Use an installed Chromium browser on machines without Playwright's bundled browser.
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], channel: process.env.PLAYWRIGHT_CHANNEL || undefined } }],
   webServer: [
     {
       command: "npx tsx mock/server.ts",
