@@ -99,8 +99,13 @@ export async function executeV8Dag({ trialRoot, task, router, candidates, histor
   let execution: ExecutionResult;
   try {
     execution = await executeV7Dag({ trialRoot, task, candidate, history, afterPatch, runtimeFactory, language, evidenceLimit,
-      fallbackAgent: fallbackAgent ? input => fallbackAgent({ ...input, evidencePacket: recovery
-        ? `${input.evidencePacket}\n\nBOUNDED READ-ONLY RECOVERY\n${recovery.packet}` : input.evidencePacket }) : null,
+      fallbackAgent: fallbackAgent ? input => {
+        const extra = evidenceLimit ? recovery?.packet.split(/\n\n(?=FILE )/)
+          .filter(section => !input.evidencePacket.includes(`${section.split("\n")[0]}\n`)).join("\n\n") : recovery?.packet;
+        const evidencePacket = extra ? `${input.evidencePacket}\n\nBOUNDED READ-ONLY RECOVERY\n${extra}` : input.evidencePacket;
+        if (evidenceLimit && evidencePacket.length > evidenceLimit) throw new Error("Recovery evidence exceeds input budget");
+        return fallbackAgent({ ...input, evidencePacket });
+      } : null,
       synthesize: async input => {
         // Avoid paying twice for files already collected by the selected DAG.
         const extra = recovery?.packet.split(/\n\n(?=FILE )/)

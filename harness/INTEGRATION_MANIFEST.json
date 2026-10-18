@@ -5,7 +5,7 @@
   "overrides": {
     "src/index.ts": {
       "originalSha256": "b697453a53517e2197bc3961d11473effc0bb49db645f6f55a3a5e9f2fd5f33d",
-      "integrationSha256": "5b9afb1c4339a9bc7f035c16a4d2944aba57e468f3ed4e3b3d3cde468aaa9eaa"
+      "integrationSha256": "68ce0760a8b44480f6e93cbc2dbc7621f84cf7c1ca6e1c811a34fe4fdb4b85e0"
     },
     "src/master-tool-1.ts": {
       "originalSha256": "f2a5b9cbdfae66a2f907fea97f2d2d18f8ad467c33a2f64828273e3874f370c2",
@@ -21,11 +21,11 @@
     },
     "src/v7-executor.ts": {
       "originalSha256": "8337297ca1386727e0d8e5bc246cce3974822eae979e5b624aab08c81b2b902f",
-      "integrationSha256": "65ee3544cd2157717542f67aefce30eee297005035018a917ab093016335ed7f"
+      "integrationSha256": "b4f45f5a8b89dbc45d7b5402c99bcae893bf710e2023dc4b3def6659a53a9071"
     },
     "src/v8-executor.ts": {
       "originalSha256": "e819eb533163860f229211e854c7fb7d27c4cf53e19413e7b87a705e4b853778",
-      "integrationSha256": "62198cb2e27b5ad38daefb4f480b6b372b17fd968264df1a5dae4dc58c55a1a8"
+      "integrationSha256": "d9d5af461952649069a191ead6c3ab537d55cf9dce5dccec7bd0c8df7494960f"
     },
     "test/freeze-manifest.check.ts": {
       "originalSha256": "130c060ddbc42047ace5b9d5ae65d5eff1a5cebd1d0dcc758628ba4d23b78817",
@@ -35,9 +35,11 @@
   "additions": {
     "src/evidence-runtime.ts": "a2f79efda77f5e75c95caa0868feeee178a1a05d18ccd0f0d7013eb62cf4e6a0",
     "src/repository-language.ts": "080328ebb5911d95a363f0b71a09e0d2f24406f2dcdecc83121846d713accff4",
+    "src/structured-patch.ts": "3821d47b7a0f6fe23ffa5f855fae01f9af7af4cac185b20e153706765ca9c1b2",
     "test/backend-runtime.test.ts": "8c2aa62bd607838ba77bab486c98eb94ccba0fb81a188fc3be95e3eaf8b7e3db",
     "test/production-evidence.test.ts": "fa18a7295d461d55e33100b0149d9c5e30995946cb4fcfb9b31c70fb3372cffc",
     "test/router-validation.test.ts": "44d225644baad5ed80bb1819d71c7219f10bb29d6fc3b74df872a65714aa5ce1",
+    "test/structured-patch.test.ts": "cc3294ad2346754db5ab6b9ac5eebbcdfe51cd832fa48821402bf9b88260ee3a",
     "docs/INTEGRATION_REVISION_1.md": "ebed0562bb562ecbc5eb07a0e9439f5b0c610113e438b74edd09bee32c891477",
     "docs/INTEGRATION_REVISION_2.md": "c98090641c325412f607efb3c2c610f08b204a97ddfdf0ef56a1cf3ee437e349",
     "docs/PRODUCTION_PLAN.md": "764be092ce3ed669c4345785db7788c7f7c693be1adf9947ffa28bf135f3a839",

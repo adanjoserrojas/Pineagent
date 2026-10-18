@@ -3,7 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Harness, HarnessContext } from "@pineagent/core/server";
 import type { RunActionAck, RunStartAck, RunView } from "@pineagent/core/contracts";
 import { executeV8Dag, selectCandidateDags, prototypeTools, FROZEN_HISTORY, javascriptLanguage,
-  type Router, type RouteDecision, type Patch, type TestResult, type DagCandidate } from "@pineagent/harness";
+  type Router, type RouteDecision, type Patch, type TestResult, type DagCandidate, type FileSnapshot } from "@pineagent/harness";
 import { BackendTools, type EvidenceVersions } from "./tools";
 import { languageForPlan } from "./python";
 import type { ModelReceipt } from "../models/bedrock";
@@ -12,7 +12,7 @@ import { validateFeaturePlan, type FeaturePlan } from "./feature-plan";
 type Model = {
   receipts?(): ModelReceipt[];
   plan(task: string, files: string[], signal?: AbortSignal): Promise<FeaturePlan>;
-  patch(input: { task: string; evidence: string; allowedWrites: string[] }, signal?: AbortSignal, recovery?: boolean): Promise<Patch>;
+  patch(input: { task: string; evidence: string; allowedWrites: string[]; bases?: FileSnapshot[] }, signal?: AbortSignal, recovery?: boolean): Promise<Patch>;
 };
 type Run = { view: RunView; abort: AbortController; work: Promise<void>; pause: boolean;
   choice?: string; hint?: string; rejected: number; candidates: DagCandidate[] };
@@ -156,6 +156,9 @@ export class LiveHarness implements Harness {
         run.candidates = selectCandidateDags({ goalCapability: "verified_change", tools: prototypeTools });
         await this.acquire(run);
         await runtime(plan.allowedWrites).observeCreates(plan.createPaths ?? []);
+        const bases = () => plan.allowedWrites.flatMap(path => {
+          const entry = observations.get(path); return entry ? [{ path, content: entry.content }] : [];
+        });
         while (true) {
           await boundary();
           this.emit(run, { state: "routing", candidates: undefined });
@@ -178,13 +181,13 @@ export class LiveHarness implements Harness {
             runtimeFactory: ({ allowedWrites, outputLimit }) => runtime(allowedWrites, outputLimit),
             synthesize: async input => { await boundary(); await runtime([]).assertFresh();
               providerAttempts++;
-              return activeModel.patch({ ...input, allowedWrites: plan.allowedWrites }, run.abort.signal); },
+              return activeModel.patch({ ...input, allowedWrites: plan.allowedWrites, bases: bases() }, run.abort.signal); },
             fallbackAgent: async input => {
               await boundary(); this.emit(run, { codingRecovery: "warm_agent" });
               const tools = runtime(plan.allowedWrites);
               await tools.assertFresh();
               providerAttempts++;
-              const patch = await activeModel.patch({ task: run.view.task, evidence: input.evidencePacket, allowedWrites: plan.allowedWrites }, run.abort.signal, true);
+              const patch = await activeModel.patch({ task: run.view.task, evidence: input.evidencePacket, allowedWrites: plan.allowedWrites, bases: bases() }, run.abort.signal, true);
               await tools.writeFiles(patch.files);
               return { status: "patched", modelCalls: 1, usage: patch.usage };
             },

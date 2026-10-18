@@ -11,3 +11,4 @@ export { SandboxToolRuntime } from "./sandbox-tools.js";
 export { routeHistoryPriors, classifyTaskShape, evaluateEvidenceCheckpoint } from "./adaptive-checkpoint.js";
 export { synthesizePatch, createResponse, responseUsage } from "./openai-response-client.js";
 export { javascriptLanguage, isJavaScriptTest } from "./repository-language.js";
+export { materializePatch, contentHash } from "./structured-patch.js";

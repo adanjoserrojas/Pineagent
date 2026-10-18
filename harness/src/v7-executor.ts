@@ -96,15 +96,16 @@ export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fal
       await collect(next.route);
     }
   }
-  const evidence = [
+  const renderEvidence = (snapshots = files) => [
     ...(task.acceptanceCriteria?.length ? [`Acceptance criteria:\n${task.acceptanceCriteria.map((value, i) => `${i + 1}. ${value}`).join("\n")}`] : []),
     ...(task.createPaths?.length ? [`Planned new files (must all be implemented): ${JSON.stringify(task.createPaths)}`] : []),
     `Repository: ${allFiles.length} files. Exact-symbol candidates: ${JSON.stringify(symbolHits.slice(0, 8))}`,
     `Executed routes: ${routes.join(", ")}. Checkpoints: ${JSON.stringify(checkpoints)}`,
     ...discoveries.map(d => JSON.stringify(d)),
-    ...[...files].map(([file, content]) => `FILE ${file}\n${content}`),
+    ...[...snapshots].map(([file, content]) => `FILE ${file}\n${content}`),
     "Cross-file change contract: trace imports and callers, preserve exports, validate at the correct layer, and propagate the value to every public consumer. Implement all task requirements, including edge cases.",
   ].join("\n\n");
+  const evidence = renderEvidence();
   if (evidenceLimit && evidence.length > evidenceLimit) throw new Error("Complete evidence exceeds input budget");
   modelCalls += 1;
   try {
@@ -115,6 +116,7 @@ export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fal
     const recoverable = /Patch contained no files|Patch response did not contain output text|Unexpected token.*JSON/i.test(String((error as Error).message));
     if (!recoverable || !fallbackAgent) throw error;
     const packet = [evidence, `Patch synthesis produced no applicable change: ${(error as Error).message}. Continue from the unchanged working tree.`].join("\n\n");
+    if (evidenceLimit && packet.length > evidenceLimit) throw new Error("Recovery evidence exceeds input budget");
     fallback = await fallbackAgent({ trialRoot, task, evidencePacket: packet });
     modelCalls += Number(fallback.modelCalls ?? 0);
     fullTest = await runtime.runTests();
@@ -132,8 +134,13 @@ export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fal
   if (fullTest.exitCode !== 0 && fallbackAgent) {
     const current = [];
     for (const changed of patch.files) current.push(`CURRENT FILE ${changed.path}\n${await readText(changed.path)}`);
-    const packet = ["The earlier FILE sections are pre-patch snapshots. Current changed files follow. Continue from the current working tree.", evidence,
-      ...current, `Visible verification failed:\n${fullTest.output.slice(-5000)}`].join("\n\n");
+    const updated = new Map(files);
+    if (evidenceLimit) for (const changed of patch.files) updated.set(changed.path, await readText(changed.path));
+    const packet = evidenceLimit
+      ? ["These are current workspace snapshots. Repair the failed feature without restarting discovery.", renderEvidence(updated), `Visible verification failed:\n${fullTest.output.slice(-5000)}`].join("\n\n")
+      : ["The earlier FILE sections are pre-patch snapshots. Current changed files follow. Continue from the current working tree.", evidence,
+        ...current, `Visible verification failed:\n${fullTest.output.slice(-5000)}`].join("\n\n");
+    if (evidenceLimit && packet.length > evidenceLimit) throw new Error("Recovery evidence exceeds input budget");
     fallback = await fallbackAgent({ trialRoot, task, evidencePacket: packet });
     modelCalls += Number(fallback.modelCalls ?? 0);
     fullTest = await runtime.runTests();

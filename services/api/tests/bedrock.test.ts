@@ -1,7 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { OpusRun, OPUS_MODEL, type ModelTransport } from "../src/models/bedrock";
+import { contentHash } from "@pineagent/harness";
 
 describe("bounded Opus model gateway", () => {
+  it("materializes a hash-bound feature edit without sending duplicate base contents", async () => {
+    const content = "export const value = 1;";
+    const run = new OpusRun({ runId: "edit", ownerId: "alice", transport: async input => {
+      const prompt = JSON.parse(input.messages![0].content![0].text!);
+      expect(prompt.bases).toBeUndefined();
+      expect(prompt.baseHashes["app.mjs"]).toBe(contentHash(content));
+      return { $metadata: {}, stream: (async function* () {
+        yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: JSON.stringify({ edits: [{ path: "app.mjs",
+          baseSha256: contentHash(content), changes: [{ before: "value = 1", after: "value = 2" }] }] }) } } };
+        yield { messageStop: { stopReason: "end_turn" } };
+      })() };
+    } });
+    const patch = await run.patch({ task: "change value", evidence: content, allowedWrites: ["app.mjs"], bases: [{ path: "app.mjs", content }] });
+    expect(patch.files).toEqual([{ path: "app.mjs", content: "export const value = 2;" }]);
+    expect(run.receipts()).toHaveLength(1);
+  });
   it("uses Opus 4.6 adaptive thinking and returns validated patch text with usage", async () => {
     const transport: ModelTransport = async (input) => {
       expect(input.modelId).toBe(OPUS_MODEL);
