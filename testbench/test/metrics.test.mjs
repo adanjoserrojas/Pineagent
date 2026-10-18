@@ -1,0 +1,9 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {normalizeUsage,totalUsage,cliUsage,analyze} from '../src/metrics.mjs';
+test('cache and reasoning are subsets, not additional tokens',()=>{const usage=normalizeUsage({input_tokens:100,output_tokens:40,input_tokens_details:{cached_tokens:60},output_tokens_details:{reasoning_tokens:30}});assert.equal(totalUsage([{usage}]).totalTokens,140);assert.equal(totalUsage([{usage}]).cachedInputTokens,60);});
+test('missing and failed receipts cannot become zero',()=>{const x=totalUsage([{usage:normalizeUsage({input_tokens:12,output_tokens:4})},{usage:null}]);assert.equal(x.totalTokens,null);assert.equal(x.complete,false);assert.equal(totalUsage([]).totalTokens,0);});
+test('Codex turn usage excludes unrelated events',()=>{assert.equal(cliUsage('{"type":"item.completed"}\n{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":2}}\n')[0].inputTokens,10);});
+const row=(taskId,arm,tokens,passed=true)=>({taskId,arm,repetition:0,mode:'live',passed,status:'completed',wallMs:1,usage:{totalTokens:tokens,complete:true}});
+test('paired intervals, incomplete pairs and duplicate detection',()=>{const rows=Array.from({length:10},(_,i)=>[row(String(i),'harness',50),row(String(i),'codex',100)]).flat();const a=analyze(rows,{bootstrap:500});assert.equal(a.tokenRatio,.5);assert.deepEqual(a.tokenRatioCI,[.5,.5]);assert.equal(a.distinctTasks,10);assert.match(a.verdict,/exploratory/);assert.throws(()=>analyze([...rows,rows[0]]));const b=analyze(rows.slice(1),{bootstrap:100});assert.equal(b.unpairedTrials,1);});
+test('unknown usage blocks token intervals',()=>{const rows=[row('a','harness',50),row('a','codex',100),row('b','harness',50),row('b','codex',100)];rows[0].usage={complete:false,totalTokens:null};assert.equal(analyze(rows,{bootstrap:100}).tokenRatioCI,null);});
