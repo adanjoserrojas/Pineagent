@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "sync-faces": "node scripts/sync-faces.mjs"
+    "sync-faces": "node scripts/sync-faces.mjs",
+    "plant-voice": "node --env-file-if-exists=.env.local scripts/plant-voice.mjs"
   },
   "dependencies": {
     "@auth0/auth0-react": "^2.28.2",

@@ -63,3 +63,41 @@ import discovery are not claimed. Crown and the original Ratatui source are unch
 Rebuild the final reviewed commit after resolving release ownership; the later
 installer safety guard requires the expected previous SHA explicitly. No branch
 push, PR, merge, or GitHub change to My_App was performed by this session.
+
+## Deployed-version integration (2026-10-18)
+
+The owner authorized integrating deployed `f9c7f0d9de20f293acccc453dca7895740ed12ca`
+before continuing deployment. This brings in the existing USB/voice browser bridge,
+its firmware source, prerecorded voice assets and shared-file import repair. The
+only merge conflict was equivalent import ordering in `workspace.ts`; both sides'
+behavior is preserved. No device was flashed and no hardware topology changed.
+
+The integration itself changes no harness source/manifests, Python adapter,
+sandbox, authenticated PTY, original Rust CLI or shared workspace contracts.
+Merged Linux verification: harness 34/34, web 143/143, API 71/71; all workspace
+typechecks and three frozen-manifest checks pass. Actual Docker/CLI/My_App tests
+were enabled, not skipped. These remain mocked-provider integration tests.
+
+Merged browser verification: the complete 64-test single-worker Edge run passed
+63 tests; one long split-editor scenario exceeded its existing 30-second limit.
+An unchanged focused rerun passed in 13.3 seconds with the same timeout and
+assertions. Thus all 64 scenarios have passing evidence across these runs, not
+one all-green full run. The real Ratatui input/resize/exit tests passed at
+390/900/1440px. Desktop/mobile Crown and desktop Ratatui screenshots were inspected.
+Commands: `node ../../node_modules/@playwright/test/cli.js test --workers=1`, then
+`test split.spec.ts --grep "split groups synchronize" --workers=1`; run from
+`apps/web` with `PLAYWRIGHT_CHANNEL=msedge`, `PTY_BROWSER_API=http://localhost:3312`,
+`E2E_MOCK_PORT=3139`, `E2E_WEB_PORT=5199` and the isolated Docker preview fixture.
+An initial npm-wrapper invocation ignored the requested worker limit; that run
+was stopped and is not counted as verification evidence.
+
+Independent standards/spec reviews found no harness/PTY/Python preservation
+blocker. Two pre-existing incoming USB reliability issues remain with the UI /
+hardware owner: disconnect during delayed reconnect can reopen the port, and a
+late reply after timeout can acknowledge the next command. They are not repaired
+by this integration and physical USB recovery is not claimed verified. Browser
+mock tests cannot establish physical-device safety or reliability.
+
+The signed-in production browser identifies `4dandev` and reports no access to
+Pineagent. An authorized GitHub collaborator session for My_App is required for
+the live authenticated provider test; authorization will not be bypassed.

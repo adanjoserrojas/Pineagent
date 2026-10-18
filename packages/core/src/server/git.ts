@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
+// hi
 export type GitStatusEntry = { path: string; status: "M" | "A" | "D" };
 
 export class GitError extends Error {
