@@ -78,7 +78,7 @@ test("the agent locks its file: the owner's editor is read-only until it finishe
     /^\/\/ alice's agent: tidy auth\.ts\n/,
   );
 
-  await alice.getByRole("button", { name: "Commit…" }).click();
+  await alice.getByRole("button", { name: /^Commit, / }).click();
   await expect(alice.getByRole("dialog").getByRole("checkbox", { name: /src\/auth\.ts/ })).toBeChecked();
 });
 
