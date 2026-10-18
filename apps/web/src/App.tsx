@@ -1,8 +1,6 @@
 import { DEV_TOOLS } from "./devtools";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSession } from "./auth/AuthGate";
-import { EditorGroup } from "./editor/EditorGroup";
-import { activate, activePaths, close, focus, focusedActive, initialLayout, isImagePath, openIn, split, type Layout } from "./editor/layout";
 import { SessionManager } from "./editor/sessions";
 import { CommitDialog } from "./git/CommitDialog";
 import { RunsColumn } from "./runs/RunsColumn";
@@ -11,6 +9,7 @@ import { createWorkspaceStore, useWorkspace } from "./state/workspace";
 import { FileTree } from "./tree/FileTree";
 import { CommitButton } from "./git/CommitButton";
 import { MemberChip } from "./ui/ProfileCard";
+import { Avatar } from "./ui/Avatar";
 import { ConnectionPill } from "./ui/ConnectionPill";
 import { RepoPicker } from "./ui/RepoPicker";
 import { workspaceFromPath } from "./routes";
@@ -20,6 +19,7 @@ import { BranchActivity } from "./ui/BranchActivity";
 import { ResizeHandle } from "./ui/ResizeHandle";
 import { defaultLayout, useWorkspaceLayout } from "./ui/useWorkspaceLayout";
 import { EditorGroups, type SplitDirection } from "./editor/EditorGroups";
+import { activate, activePaths, close, focus, focusedActive, initialLayout, isImagePath, openIn, split as splitLayout } from "./editor/layout";
 
 function apiUrl() {
   // ?api= lets e2e tests point a page at their own mock instance; dev builds only.
@@ -37,18 +37,17 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
   const store = useMemo(createWorkspaceStore, []);
   const ws = useWorkspace(store);
   const [socket, setSocket] = useState<WorkspaceSocket | null>(null);
-  const [paths, setPaths] = useState<[string | null, string | null]>([null, null]);
-  const [activeEditor, setActiveEditor] = useState<0 | 1>(0);
-  const [split, setSplit] = useState<SplitDirection>(null);
-  const openPath = paths[activeEditor];
+  const [editors, setEditors] = useState(initialLayout);
+  const [splitDirection, setSplitDirection] = useState<Exclude<SplitDirection, null>>("right");
+  const split = editors.groups.length > 1 ? splitDirection : null;
+  const openPath = focusedActive(editors);
   function openFile(path: string) {
-    setPaths((current) => activeEditor === 0 ? [path, current[1]] : [current[0], path]);
+    setEditors((current) => openIn(current, path));
     setPanel("editor");
   }
-  function splitEditor(direction: Exclude<SplitDirection, null>) {
-    if (!split) setPaths((current) => [current[0], current[activeEditor]]);
-    setSplit(direction);
-    setActiveEditor(1);
+  function splitEditor(direction: Exclude<SplitDirection, null>, copyActive = true) {
+    setEditors((current) => focus(splitLayout(current, copyActive), 1));
+    setSplitDirection(direction);
     setPanel("editor");
   }
   const [commitOpen, setCommitOpen] = useState(false);
@@ -95,7 +94,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
     }
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
-  }, [split, activeEditor, layout]);
+  }, [layout]);
 
   useEffect(() => {
     const s = connectWorkspace({ apiUrl: apiUrl(), wsId, branch, getToken: session.getToken, store });
@@ -119,8 +118,8 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
 
   // Presence follows the focused group; sessions follow the unique visible files.
   useEffect(() => {
-    manager?.syncOpenPaths(split ? paths : [paths[0]]);
-  }, [manager, paths, split]);
+    manager?.syncOpenPaths(activePaths(editors).filter((path) => !isImagePath(path)));
+  }, [manager, editors]);
 
   // Presence is re-sent after every (re)join so other people see what this user has open.
   useEffect(() => {
@@ -201,6 +200,9 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
             openPath={openPath}
             loading={ws.connection !== "connected"}
             onOpen={openFile}
+            onCreate={socket && ws.connection === "connected"
+              ? (path, kind) => socket.timeout(8000).emitWithAck("tree:create", { path, kind }).catch(() => null)
+              : undefined}
           />
           <section className="branch-people" aria-label="Branch presence">
             <h2 className="section-label">In this branch <span>{ws.members.length}</span></h2>
@@ -228,9 +230,13 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
             <button type="button" aria-label="Toggle activity" aria-expanded={layout.activityVisible} onClick={() => setLayout((l) => ({ ...l, activityVisible: !l.activityVisible }))}>Activity</button>
             <button type="button" aria-label="Reset panel layout" onClick={() => setLayout(defaultLayout)}>Reset layout</button>
           </div>
-          <EditorGroups paths={paths} active={activeEditor} split={split} manager={manager}
+          <EditorGroups groups={editors.groups} active={editors.focused} split={split} manager={manager} socket={socket}
             connected={ws.connection === "connected"} selfId={ws.self?.userId ?? null} members={ws.members}
-            onActivate={setActiveEditor} onCloseSplit={() => { setSplit(null); setActiveEditor(0); setPaths((p) => [p[0], null]); }}
+            onActivate={(group) => setEditors((current) => focus(current, group))}
+            onActivateTab={(group, path) => setEditors((current) => activate(current, group, path))}
+            onCloseTab={(group, path) => setEditors((current) => close(current, group, path))}
+            onSplit={() => splitEditor("right", false)}
+            onCloseSplit={() => setEditors((current) => ({ groups: [current.groups[0]], focused: 0 }))}
             onPauseRun={(runId) => socket?.emit("run:pause", { runId }, () => {})}
             welcome={
             <div className="workspace-welcome">

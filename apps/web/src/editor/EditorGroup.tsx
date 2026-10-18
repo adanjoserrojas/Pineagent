@@ -1,4 +1,4 @@
-import { lazy, Suspense, useSyncExternalStore, type MouseEvent } from "react";
+import { lazy, Suspense, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
 import type { Member } from "../contracts/socket";
 import type { WorkspaceSocket } from "../net/socket";
 import type { Group } from "./layout";
@@ -16,7 +16,8 @@ export function EditorGroup({
   group,
   focused,
   canSplit,
-  onFocus,
+  paneId,
+  welcome,
   onActivate,
   onClose,
   onSplit,
@@ -30,7 +31,8 @@ export function EditorGroup({
   group: Group;
   focused: boolean;
   canSplit: boolean;
-  onFocus: () => void;
+  paneId: string;
+  welcome: ReactNode;
   onActivate: (path: string) => void;
   onClose: (path: string) => void;
   onSplit: () => void;
@@ -42,8 +44,8 @@ export function EditorGroup({
   onPauseRun: (runId: string) => void;
 }) {
   return (
-    <div className={`editor-group${focused ? " editor-group-focused" : ""}`} onMouseDownCapture={onFocus} onFocusCapture={onFocus}>
-      <div className="editor-tabbar">
+    <div className={`editor-group-content${focused ? " editor-group-focused" : ""}`}>
+      {group.tabs.length > 0 && <div className="editor-tabbar">
         <div className="editor-tabs" role="tablist" aria-label="Open files">
           {group.tabs.map((path) => (
             <Tab key={path} path={path} active={path === group.active} manager={manager} onActivate={onActivate} onClose={onClose} />
@@ -54,17 +56,17 @@ export function EditorGroup({
             ◫ Split
           </button>
         )}
-      </div>
+      </div>}
       {group.active && manager && socket ? (
         <Suspense fallback={<p className="editor-note">Starting editor…</p>}>
           {isImagePath(group.active) ? (
             <ImageViewer socket={socket} path={group.active} />
           ) : (
-            <EditorPane manager={manager} path={group.active} connected={connected} selfId={selfId} members={members} onPauseRun={onPauseRun} />
+            <EditorPane paneId={paneId} showPathHeader={false} manager={manager} path={group.active} connected={connected} selfId={selfId} members={members} onPauseRun={onPauseRun} />
           )}
         </Suspense>
       ) : (
-        <p className="editor-note">Select a file to open it.</p>
+        welcome
       )}
     </div>
   );

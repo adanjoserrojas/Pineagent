@@ -1,15 +1,19 @@
-import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Member } from "../contracts/socket";
 import type { SessionManager } from "./sessions";
 import { ResizeHandle } from "../ui/ResizeHandle";
+import { EditorGroup } from "./EditorGroup";
+import type { Group } from "./layout";
+import type { WorkspaceSocket } from "../net/socket";
 
-const EditorPane = lazy(() => import("./EditorPane"));
 export type SplitDirection = "right" | "down" | null;
 
-export function EditorGroups({ paths, active, split, manager, connected, selfId, members, onActivate, onCloseSplit, onPauseRun, welcome }: {
-  paths: [string | null, string | null]; active: 0 | 1; split: SplitDirection; manager: SessionManager | null;
+export function EditorGroups({ groups, active, split, manager, socket, connected, selfId, members, onActivate, onActivateTab, onCloseTab, onSplit, onCloseSplit, onPauseRun, welcome }: {
+  groups: Group[]; active: number; split: SplitDirection; manager: SessionManager | null; socket: WorkspaceSocket | null;
   connected: boolean; selfId: string | null; members: Member[];
-  onActivate: (group: 0 | 1) => void; onCloseSplit: () => void; onPauseRun: (runId: string) => void; welcome: ReactNode;
+  onActivate: (group: number) => void; onActivateTab: (group: number, path: string) => void;
+  onCloseTab: (group: number, path: string) => void; onSplit: () => void;
+  onCloseSplit: () => void; onPauseRun: (runId: string) => void; welcome: ReactNode;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
@@ -23,7 +27,7 @@ export function EditorGroups({ paths, active, split, manager, connected, selfId,
   const extent = Math.max(1, (stacked ? size.height : size.width) - 6);
   return <div ref={host} className="editor-groups" data-split={split ? (stacked ? "down" : "right") : "none"}
     style={{ "--split-first": `${ratio}fr`, "--split-second": `${1 - ratio}fr` } as CSSProperties}>
-    {([0, 1] as const).filter((index) => index === 0 || split).map((index) => (
+    {groups.map((group, index) => (
       <div key={index} className="editor-group-slot">
         {index === 1 && <ResizeHandle label="Resize editor split" axis={stacked ? "y" : "x"} value={ratio * extent}
           min={extent * 0.25} max={extent * 0.75} onChange={(value) => setRatio(value / extent)} onReset={() => setRatio(0.5)} />}
@@ -36,10 +40,11 @@ export function EditorGroups({ paths, active, split, manager, connected, selfId,
             <span>{active === index ? "Files open here" : ""}</span>
             {index === 1 && <button type="button" aria-label="Close split" title="Close second editor group" onClick={onCloseSplit}>×</button>}
           </div>}
-          {paths[index] && manager ? <Suspense fallback={<p className="editor-note">Starting editor…</p>}>
-            <EditorPane paneId={`group-${index}`} manager={manager} path={paths[index]} connected={connected}
-              selfId={selfId} members={members} onPauseRun={onPauseRun} />
-          </Suspense> : welcome}
+          <EditorGroup group={group} paneId={`group-${index}`} focused={active === index}
+            canSplit={!split && group.tabs.length > 0} onActivate={(path) => onActivateTab(index, path)}
+            onClose={(path) => onCloseTab(index, path)} onSplit={onSplit}
+            manager={manager} socket={socket} connected={connected} selfId={selfId} members={members}
+            onPauseRun={onPauseRun} welcome={welcome} />
         </section>
       </div>
     ))}

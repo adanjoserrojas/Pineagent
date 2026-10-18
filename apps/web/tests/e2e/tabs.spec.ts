@@ -45,15 +45,16 @@ test("closing a tab (button or middle click) activates a neighbour", async ({ pa
   await expect(tabs(page)).toHaveText(["auth.ts"]);
   await expect(code(page)).toContainText("currentUser");
   await page.getByRole("button", { name: "Close src/auth.ts" }).click();
-  await expect(page.getByText("Select a file to open it.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Good work grows here." })).toBeVisible();
 });
 
 test("split view shows two files side by side and opens explorer files in the focused group", async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 1100 });
   await page.goto(home("alice"));
   await ready(page);
   await openFile(page, "src/auth.ts");
   await expect(code(page)).toContainText("currentUser", { timeout: 15_000 });
-  await page.getByRole("button", { name: "Split editor" }).click();
+  await page.getByRole("button", { name: "Split editor", exact: true }).click();
   await expect(page.locator(".editor-group")).toHaveCount(2);
   await openFile(page, "src/db.ts");
   const groups = page.locator(".editor-group");
@@ -77,13 +78,15 @@ test("split view shows two files side by side and opens explorer files in the fo
 });
 
 test("groups stack vertically on narrow screens", async ({ page }) => {
-  await page.setViewportSize({ width: 700, height: 900 });
+  // Crown stacks when the available editor width is below 560px.
+  await page.setViewportSize({ width: 390, height: 900 });
   await page.goto(home("alice"));
   await ready(page);
   await openFile(page, "src/auth.ts");
-  await page.getByRole("button", { name: "Split editor" }).click();
+  await page.getByRole("button", { name: "Split editor", exact: true }).click();
   await openFile(page, "src/db.ts");
   const groups = page.locator(".editor-group");
+  await expect(page.locator(".editor-groups")).toHaveAttribute("data-split", "down");
   const [a, b] = [await groups.nth(0).boundingBox(), await groups.nth(1).boundingBox()];
   expect(b!.y).toBeGreaterThan(a!.y + a!.height - 2);
 });
