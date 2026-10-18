@@ -21,7 +21,7 @@ export type HarnessContext = {
 };
 
 export interface Harness {
-  start(owner: { id: string; name: string }, task: unknown): RunStartAck;
+  start(owner: { id: string; name: string }, task: unknown, mode?: unknown): RunStartAck;
   list(): RunView[];
   approve(runId: string, userId: string, choice: { candidateId?: unknown; none?: unknown; hint?: unknown }): RunActionAck;
   pause(runId: string, userId: string): RunActionAck;

@@ -6,9 +6,11 @@ import { executeV8Dag, selectCandidateDags, prototypeTools, FROZEN_HISTORY,
   type Router, type RouteDecision, type Patch, type TestResult, type DagCandidate } from "@pineagent/harness";
 import { BackendTools, type EvidenceVersions } from "./tools";
 import { languageForPlan } from "./python";
+import { readQuestionEvidence } from "./ask";
 import { ModelFailure, type ModelReceipt } from "../models/bedrock";
 
 type Model = {
+  answer?(input: { task: string; evidence: string }, signal?: AbortSignal): Promise<string>;
   receipts?(): ModelReceipt[];
   plan(task: string, files: string[], signal?: AbortSignal): Promise<{ allowedWrites: string[]; visibleTestPath: string }>;
   patch(input: { task: string; evidence: string; allowedWrites: string[] }, signal?: AbortSignal, recovery?: boolean): Promise<Patch>;
@@ -46,7 +48,8 @@ export class LiveHarness implements Harness {
 
   list(): RunView[] { return [...this.runs.values()].map(run => structuredClone(run.view)); }
 
-  start(owner: { id: string; name: string }, task: unknown): RunStartAck {
+  start(owner: { id: string; name: string }, task: unknown, mode: unknown = "code"): RunStartAck {
+    if (mode !== "ask" && mode !== "code") return { ok: false, code: "BAD_REQUEST" };
     if (typeof task !== "string" || !task.trim() || task.length > 8000) return { ok: false, code: "BAD_REQUEST" };
     if (this.closed || [...this.runs.values()].filter(run => !terminal(run)).length >= 4) return { ok: false, code: "NOT_AVAILABLE" };
     if (this.runs.size >= 100) {
@@ -55,7 +58,7 @@ export class LiveHarness implements Harness {
     }
     const runId = randomUUID();
     const run: Run = { view: { runId, ownerId: owner.id, ownerName: owner.name, task: task.trim(), state: "planning",
-      routerMode: null, codingRecovery: "none", nodeIndex: -1, seq: 0, steps: [], writeSet: [], startedAt: Date.now() },
+      mode, routerMode: null, codingRecovery: "none", nodeIndex: -1, seq: 0, steps: [], writeSet: [], startedAt: Date.now() },
       abort: new AbortController(), pause: false, rejected: 0, candidates: [], work: Promise.resolve() };
     this.runs.set(runId, run);
     this.emit(run);
@@ -80,7 +83,7 @@ export class LiveHarness implements Harness {
   }
   pause(id: string, owner: string): RunActionAck {
     return this.action(id, owner, run => {
-      if (terminal(run) || run.view.state === "awaiting_approval" || run.pause) return false;
+      if (run.view.mode === "ask" || terminal(run) || run.view.state === "awaiting_approval" || run.pause) return false;
       run.pause = true; return true;
     });
   }
@@ -165,6 +168,19 @@ export class LiveHarness implements Harness {
     try {
       const activeModel = this.options.model(ownerId, runId);
       model = activeModel;
+      if (run.view.mode === "ask") {
+        phase = "read-only discovery";
+        const evidence = await readQuestionEvidence(context, run.view.task, boundary);
+        await evidence.assertFresh();
+        if (!activeModel.answer) throw new Error("Read-only answers unavailable");
+        phase = "read-only answer";
+        this.emit(run, { state: "executing", evidencePaths: evidence.paths });
+        providerAttempts++;
+        const answer = await activeModel.answer({ task: run.view.task, evidence: evidence.evidence }, run.abort.signal);
+        await evidence.assertFresh();
+        this.emit(run, { state: "done", answer, endedAt: Date.now() });
+        return;
+      }
       const scorer = this.options.router(ownerId, runId);
       planning: while (true) {
         await boundary();
@@ -255,10 +271,10 @@ export class LiveHarness implements Harness {
         ...failed } });
     } finally {
       clearTimeout(timeout);
-      try { await this.release(run); }
+      try { if (run.view.mode !== "ask") await this.release(run); }
       catch { this.emit(run, { state: "error", error: { nodeIndex: run.view.nodeIndex, message: "Sandbox revocation failed; locks retained. Operator intervention required." } }); }
       const ledger = model?.receipts?.();
-      this.options.receipt?.(runId, { status: run.view.state, modelCalls: ledger?.length ?? providerAttempts, modelAttempts: providerAttempts, executorModelCalls,
+      this.options.receipt?.(runId, { mode: run.view.mode, status: run.view.state, modelCalls: ledger?.length ?? providerAttempts, modelAttempts: providerAttempts, executorModelCalls,
         modelReceipts: ledger,
         ...(failed ? { failureCode: failed.code, failurePhase: failed.phase } : {}),
         routerMode: run.view.routerMode, codingRecovery: run.view.codingRecovery, wallMs: Date.now() - run.view.startedAt });

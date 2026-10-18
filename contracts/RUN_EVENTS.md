@@ -28,6 +28,7 @@ type RunStep = { tool: string; detail: string; writes: string[] };
 type RunCandidate = { id: string; score: number; steps: RunStep[] };
 
 type RunView = {
+  mode?: "ask" | "code"; answer?: string; evidencePaths?: string[];
   runId: string; ownerId: string; ownerName: string; task: string;
   state: RunState; routerMode: RouterMode | null; codingRecovery?: CodingRecovery;
   nodeIndex: number; seq: number;
@@ -48,6 +49,8 @@ OpenAI Decisions is the primary Master-1 scorer (`routerMode: "openai"`, matchin
 `codingRecovery` is independent of `routerMode`. It starts as `none` and becomes `warm_agent` only if the selected DAG fails visible verification and a coding agent continues from its existing working tree and evidence. A run can therefore have both `routerMode: "jev"` and `codingRecovery: "warm_agent"`. Do not report coding recovery as `routerMode: "llm"`, and do not report a Jev scorer failover as coding recovery. The backend increments `seq` and emits a new `run:event` when either value changes; the top-level value and `run` snapshot must agree. This field remains optional in the draft TypeScript mirror so SWE 2's current mock stays compatible; the real backend should always include it before interface freeze.
 
 ## Events
+
+Production `run:start` also accepts optional `mode: "ask" | "code"`. Omitted means `code` for existing clients; unknown values are rejected. `ask` is a separate read-only path: one bounded Opus answer, no planner/router/DAG, no lock acquisition, commands, patches or verification. It retains the same authenticated repository-membership check before/after generation. At most 12 safe text files and 24,000 source characters (6,000 per file) are sampled; hidden/generated/credential paths are excluded. Concurrent evidence changes reject the answer. `answer` is plain text (never HTML); `evidencePaths` identifies the sample, not proof of an exhaustive review. Ask runs cannot pause or approve; cancellation follows room/service shutdown and model timeout. Coding routing, confidence gates and recovery policy are unchanged.
 
 | Event | Direction | Payload | Ack |
 | --- | --- | --- | --- |
