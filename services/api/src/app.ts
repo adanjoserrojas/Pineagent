@@ -34,10 +34,11 @@ export type AppDeps = {
   sessions?: SessionTokens;
   protect?: GatewayOptions["protect"];
   terminal?: GatewayOptions["terminal"];
+  pty?: GatewayOptions["pty"];
   log: Log;
 };
 
-export function createApp({ config, authenticate, github, harness = noHarness, store = null, sessions, protect, terminal, log }: AppDeps) {
+export function createApp({ config, authenticate, github, harness = noHarness, store = null, sessions, protect, terminal, pty, log }: AppDeps) {
   const started = Date.now();
   let storeErrors = 0;
   const logged: Log = (event, fields) => {
@@ -55,6 +56,7 @@ export function createApp({ config, authenticate, github, harness = noHarness, s
           github: Boolean(github),
           harness: harness !== noHarness,
           terminal: Boolean(terminal),
+          interactiveTerminal: Boolean(pty),
           store: store ? { errors: storeErrors } : null,
         }),
       );
@@ -102,6 +104,7 @@ export function createApp({ config, authenticate, github, harness = noHarness, s
     sessionActive: (user) => sessions?.active(user) ?? false,
     protect,
     terminal,
+    pty,
     authorize,
     prepare,
     gitCredentials: async (userId) => (github ? tokenEnv(await github.githubToken(userId)) : {}),

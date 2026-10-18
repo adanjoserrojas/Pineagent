@@ -139,6 +139,10 @@ export type GitResult =
   | { jobId: string; userId: string; ok: false; code: GitErrorCode; message: string; paths?: string[] };
 
 export interface ClientToServerEvents {
+  "terminal:open": (msg: { cols: number; rows: number }, ack: (res: { ok: true; id: string } | { ok: false; code: "NOT_AVAILABLE" | "REFUSED" }) => void) => void;
+  "terminal:input": (msg: { id: string; data: string }, ack: (res: { ok: boolean }) => void) => void;
+  "terminal:resize": (msg: { id: string; cols: number; rows: number }, ack: (res: { ok: boolean }) => void) => void;
+  "terminal:close": (msg: { id: string }, ack: (res: { ok: boolean }) => void) => void;
   "terminal:command": (msg: { line: string }, ack: (res: { ok: true; result: unknown } | { ok: false; code: "NOT_AVAILABLE" | "REFUSED" }) => void) => void;
   "room:join": (msg: { wsId: string; branch: string }, ack: (res: RoomJoinAck) => void) => void;
   "presence:update": (msg: { openPath: string | null }) => void;
@@ -162,6 +166,8 @@ export interface ClientToServerEvents {
 }
 
 export interface ServerToClientEvents {
+  "terminal:output": (msg: { id: string; data: string }, ack: () => void) => void;
+  "terminal:exit": (msg: { id: string }) => void;
   // PROPOSED: status "updated" (openPath changed) and avatarUrl.
   "presence:changed": (msg: {
     userId: string;

@@ -24,7 +24,8 @@ if (!github) log("github.not_configured", { hint: "set AUTH0_M2M_CLIENT_ID and A
 const store = config.dynamo ? new DynamoStore(dynamoClient(config.dynamo.region), config.dynamo) : null;
 if (!store) log("store.not_configured", { hint: "set DYNAMODB_LOCKS_TABLE, DYNAMODB_FILES_TABLE and AWS_REGION" });
 
-const runtime = await liveRuntime(process.env, log);
+const sessions = new SessionTokens();
+const runtime = await liveRuntime(process.env, log, sessions);
 const app = createApp({
   config,
   authenticate: auth0Verifier({ ...config.auth0, warn: (m) => log("auth.warn", { message: m }) }),
@@ -32,7 +33,7 @@ const app = createApp({
   store,
   log,
   ...runtime,
-  sessions: new SessionTokens(),
+  sessions,
 });
 
 await app.listen();

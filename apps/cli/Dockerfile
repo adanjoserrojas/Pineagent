@@ -11,3 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 COPY --from=build /usr/local/bin/pineagent /usr/local/bin/pineagent
 ENTRYPOINT []
 CMD ["pineagent", "--help"]
+
+# Test runner only. Never deploy this target or mount Docker into a user sandbox.
+FROM docker:27-cli AS docker-cli
+FROM validation AS integration
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker

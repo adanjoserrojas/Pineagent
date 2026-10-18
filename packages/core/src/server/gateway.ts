@@ -23,6 +23,13 @@ import { Workspace } from "./workspace";
 export type Room = { id: string; ws: Workspace; repo: GitRepo; queue: GitQueue; harness: Harness; changes: ChangeFeed };
 
 export type JoinContext = { roomId: string; wsId: string; branch: string; user: User };
+export type PtySession = {
+  id: string; expiresAt: number;
+  read(after: number): Promise<{ data: string; offset: number; exited: boolean }>;
+  input(data: string): Promise<void>;
+  resize(cols: number, rows: number): Promise<void>;
+  close(): Promise<void>;
+};
 
 export type GatewayOptions = {
   http: HttpServer;
@@ -41,6 +48,7 @@ export type GatewayOptions = {
   // Installs sandbox fences before any user or run can mutate room authority.
   protect?(ws: Workspace, ctx: JoinContext): Promise<void>;
   terminal?(ws: Workspace, ownerId: string, line: string): Promise<{ event: string; body: Record<string, unknown> }>;
+  pty?(ctx: JoinContext, size: { cols: number; rows: number }, port: number): Promise<PtySession>;
   // Where locks, versions and editors are kept so a restart can restore them. None = memory only.
   store?: Store;
   timing?: { heartbeatMs: number; leaseMs: number; idleMs: number; sweepMs: number };
@@ -80,6 +88,7 @@ export function createGateway(opts: GatewayOptions) {
   // One Room per branch: its worktree, locks, Git queue, change feed and harness. Created on the
   // first join; a failed preparation is forgotten so the next join tries again.
   const rooms = new Map<string, Promise<Room>>();
+  const terminalClosers = new Set<() => Promise<void>>();
   const roomFor = (ctx: JoinContext): Promise<Room> => {
     let r = rooms.get(ctx.roomId);
     if (!r) {
@@ -197,6 +206,24 @@ export function createGateway(opts: GatewayOptions) {
   io.on("connection", (socket: GatewaySocket) => {
     const { user } = socket.data;
     let terminalBusy = false;
+    let pty: PtySession | null = null, ptyOpening = false, ptyEpoch = 0;
+    let ptyAdmission: Promise<PtySession> | null = null;
+    let ptyScope: SocketData["scope"], ptyClosing: Promise<void> = Promise.resolve();
+    const stopPty = () => {
+      ptyEpoch++;
+      const previous = pty; pty = null;
+      if (previous) {
+        socket.emit("terminal:exit", { id: previous.id });
+        ptyClosing = ptyClosing.then(() => previous.close());
+      }
+      const admission = ptyAdmission;
+      if (admission) ptyClosing = ptyClosing.then(() => admission.then(session => session.close(), () => {}));
+      return ptyClosing;
+    };
+    terminalClosers.add(stopPty);
+    const validPty = (id: unknown) => pty && pty.id === id && socket.connected && active(user)
+      && socket.data.scope === ptyScope && Date.now() < pty.expiresAt ? pty : null;
+    const sizeValid = (cols: number, rows: number) => Number.isInteger(cols) && cols >= 2 && cols <= 500 && Number.isInteger(rows) && rows >= 2 && rows <= 200;
     log("socket.connected", { user: user.id });
     const joined = async (writing = false) => {
       const id = socket.data.room;
@@ -247,6 +274,7 @@ export function createGateway(opts: GatewayOptions) {
       } catch {
         return ack({ ok: false, code: "UNAVAILABLE" });
       }
+      await stopPty().catch(() => log("terminal.cleanup_failed"));
       if (socket.data.room && socket.data.room !== room) socket.leave(socket.data.room);
       socket.data.room = room;
       socket.data.scope = { wsId, branch };
@@ -393,11 +421,73 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("disconnect", async () => {
+      await stopPty().catch(() => log("terminal.cleanup_failed"));
+      terminalClosers.delete(stopPty);
       const room = socket.data.room;
       if (!room) return;
       // Only announce "left" when this was the user's last socket in the room (e.g. two tabs).
       const stillHere = (await io.in(room).fetchSockets()).some((s) => s.data.user.id === user.id);
       if (!stillHere) io.to(room).emit("presence:changed", { ...presenceOf(user), status: "left" });
+    });
+
+    socket.on("terminal:open", async (msg, ack) => {
+      if (!opts.pty) return ack({ ok: false, code: "NOT_AVAILABLE" });
+      if (user.session || ptyOpening || pty || !msg || !sizeValid(msg.cols, msg.rows)) return ack({ ok: false, code: "REFUSED" });
+      ptyOpening = true;
+      const epoch = ptyEpoch;
+      try {
+        await ptyClosing;
+        const j = await joined(true);
+        const address = opts.http.address();
+        if (!j?.scope || !address || typeof address === "string") throw new Error("No terminal scope");
+        if (epoch !== ptyEpoch || !socket.connected) throw new Error("Cancelled terminal admission");
+        ptyAdmission = opts.pty({ ...j.scope, roomId: j.room, user }, msg, address.port);
+        const session = await ptyAdmission;
+        ptyAdmission = null;
+        if (epoch !== ptyEpoch || !socket.connected || socket.data.scope !== j.scope || !active(user)) { await session.close(); throw new Error("Stale terminal admission"); }
+        pty = session; ptyScope = j.scope;
+        ack({ ok: true, id: session.id });
+        void (async () => {
+          let after = 0, checked = Date.now();
+          try {
+            while (validPty(session.id)) {
+              if (Date.now() - checked >= 30_000) {
+                if (!await joined(true)) break;
+                checked = Date.now();
+              }
+              const output = await session.read(after);
+              if (!validPty(session.id)) break;
+              if (output.data) await socket.timeout(5000).emitWithAck("terminal:output", { id: session.id, data: output.data });
+              after = output.offset;
+              if (output.exited) break;
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+          } catch { /* failure closes the session; never replay input */ }
+          finally { if (pty === session) await stopPty().catch(() => log("terminal.cleanup_failed")); }
+        })();
+      } catch { ack({ ok: false, code: "REFUSED" }); }
+      finally { ptyOpening = false; ptyAdmission = null; }
+    });
+    let inputBusy = false, resizeBusy = false;
+    socket.on("terminal:input", async (msg, ack) => {
+      const session = validPty(msg?.id);
+      if (!session || inputBusy || typeof msg?.data !== "string" || !msg.data.length || Buffer.byteLength(msg.data) > 8192) return ack({ ok: false });
+      inputBusy = true;
+      try { await session.input(msg.data); ack({ ok: true }); }
+      catch { ack({ ok: false }); if (pty === session) await stopPty().catch(() => log("terminal.cleanup_failed")); }
+      finally { inputBusy = false; }
+    });
+    socket.on("terminal:resize", async (msg, ack) => {
+      const session = validPty(msg?.id);
+      if (!session || resizeBusy || !sizeValid(msg.cols, msg.rows)) return ack({ ok: false });
+      resizeBusy = true;
+      try { await session.resize(msg.cols, msg.rows); ack({ ok: true }); }
+      catch { ack({ ok: false }); }
+      finally { resizeBusy = false; }
+    });
+    socket.on("terminal:close", async (msg, ack) => {
+      if (!validPty(msg?.id)) return ack({ ok: false });
+      try { await stopPty(); ack({ ok: true }); } catch { ack({ ok: false }); }
     });
 
     socket.on("terminal:command", async ({ line }, ack) => {
@@ -432,6 +522,7 @@ export function createGateway(opts: GatewayOptions) {
     },
     close: async () => {
       clearInterval(sweeper);
+      await Promise.all([...terminalClosers].map(close => close()));
       const saving: Promise<void>[] = [];
       for (const r of rooms.values()) {
         saving.push(r.then(

@@ -1,5 +1,6 @@
 import { createServer, request, type IncomingMessage } from "node:http";
 import type { SandboxHost, SandboxSession, SandboxExecution, CommandResult } from "./host";
+import type { TerminalBackend, TerminalLaunch, TerminalChunk } from "./terminal-host";
 
 export type SandboxService = Pick<SandboxHost, "ensure" | "execute" | "quiesce">;
 const LIMIT = 65_536;
@@ -25,7 +26,7 @@ async function body(req: IncomingMessage): Promise<unknown> {
 
 // Listen ONLY on the private Unix socket in supervisor.ts. Filesystem ownership
 // is the authentication boundary; this server is never a public TCP listener.
-export function createSandboxBroker(host: SandboxService) {
+export function createSandboxBroker(host: SandboxService, terminal?: TerminalBackend) {
   return createServer({ requestTimeout: 150_000, headersTimeout: 10_000 }, async (req, res) => {
     const abort = new AbortController();
     res.on("close", () => { if (!res.writableFinished) abort.abort(); });
@@ -33,13 +34,27 @@ export function createSandboxBroker(host: SandboxService) {
       res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
       res.end(JSON.stringify(value));
     };
-    if (req.method !== "POST" || !["/open", "/execute", "/quiesce"].includes(req.url ?? "")) return send(404, { error: "NOT_FOUND" });
+    if (req.method !== "POST" || !["/open", "/execute", "/quiesce", ...(terminal ? ["/terminal/open", "/terminal/read", "/terminal/input", "/terminal/resize", "/terminal/close"] : [])].includes(req.url ?? "")) return send(404, { error: "NOT_FOUND" });
     if (Number(req.headers["content-length"]) > LIMIT) { req.resume(); return send(413, { error: "TOO_LARGE" }); }
     let value: unknown;
     try { value = await body(req); }
     catch (error) { return send(error instanceof RangeError ? 413 : 400, { error: "BAD_REQUEST" }); }
     if (!record(value)) return send(400, { error: "BAD_REQUEST" });
     try {
+      if (terminal && req.url?.startsWith("/terminal/")) {
+        if (req.url === "/terminal/open") {
+          if (!text(value.relayId) || !text(value.wsId) || !text(value.branch) || !Number.isInteger(value.cols) || !Number.isInteger(value.rows)) return send(400, { error: "BAD_REQUEST" });
+          const id = await terminal.open(value as TerminalLaunch);
+          if (abort.signal.aborted) { await terminal.close(id); return; }
+          return send(200, { id });
+        }
+        if (!text(value.id)) return send(400, { error: "BAD_REQUEST" });
+        if (req.url === "/terminal/read") return send(200, await terminal.read(value.id, value.after as number));
+        if (req.url === "/terminal/input") await terminal.input(value.id, value.data as string);
+        else if (req.url === "/terminal/resize") await terminal.resize(value.id, value.cols as number, value.rows as number);
+        else await terminal.close(value.id);
+        return send(200, { ok: true });
+      }
       if (req.url === "/quiesce") {
         if (!text(value.workspace)) return send(400, { error: "BAD_REQUEST" });
         await host.quiesce(value.workspace);
@@ -64,7 +79,7 @@ export class SandboxClient implements SandboxService {
   constructor(private readonly socketPath: string) {
     if (!socketPath.startsWith("/") && !socketPath.startsWith("\\\\.\\pipe\\")) throw new Error("Expected private supervisor socket");
   }
-  private call(path: string, value: unknown): Promise<unknown> {
+  protected call(path: string, value: unknown): Promise<unknown> {
     const data = JSON.stringify(value);
     if (Buffer.byteLength(data) > LIMIT) return Promise.reject(new Error("Sandbox request too large"));
     return new Promise((done, reject) => {
@@ -104,4 +119,20 @@ export class SandboxClient implements SandboxService {
     const response = await this.call("/quiesce", { workspace });
     if (!record(response) || response.ok !== true) throw new Error("Invalid sandbox revocation response");
   }
+}
+
+export class TerminalClient extends SandboxClient implements TerminalBackend {
+  async open(value: TerminalLaunch): Promise<string> {
+    const r = await this.call("/terminal/open", value);
+    if (!record(r) || !text(r.id)) throw new Error("Invalid terminal response");
+    return r.id;
+  }
+  async read(id: string, after: number): Promise<TerminalChunk> {
+    const r = await this.call("/terminal/read", { id, after });
+    if (!record(r) || typeof r.data !== "string" || !Number.isSafeInteger(r.offset) || typeof r.exited !== "boolean") throw new Error("Invalid terminal output");
+    return r as TerminalChunk;
+  }
+  async input(id: string, data: string) { await this.call("/terminal/input", { id, data }); }
+  async resize(id: string, cols: number, rows: number) { await this.call("/terminal/resize", { id, cols, rows }); }
+  async close(id: string) { await this.call("/terminal/close", { id }); }
 }
