@@ -1,3 +1,4 @@
+mod relay;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use pineagent_cli::{
     State, command,
@@ -54,7 +55,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|_| "Set PINEAGENT_TOKEN_FILE to your private backend session-token file")?;
     let token = fs::read_to_string(token_file).map_err(|_| "Cannot read session token file")?;
     let config = Config {
-        endpoint: env::var("PINEAGENT_URL").map_err(|_| "Set PINEAGENT_URL")?,
+        endpoint: match env::var("PINEAGENT_RELAY_SOCKET") {
+            Ok(path) => relay::endpoint(&path)?,
+            Err(_) => env::var("PINEAGENT_URL").map_err(|_| "Set PINEAGENT_URL")?,
+        },
         workspace: workspace.clone(),
         branch: branch.clone(),
         token,
