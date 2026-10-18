@@ -3,11 +3,14 @@
   "private": true,
   "description": "npm workspaces: run `npm ci` here once; each package keeps its own scripts.",
   "workspaces": [
+    "harness",
     "packages/core",
     "apps/web",
     "services/api"
   ],
   "scripts": {
+    "pretypecheck": "npm run build -w @pineagent/harness",
+    "pretest": "npm run build -w @pineagent/harness",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   }

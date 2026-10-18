@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/main.ts",
+    "prebuild": "npm run build -w @pineagent/harness",
+    "pretypecheck": "npm run build -w @pineagent/harness",
+    "pretest": "npm run build -w @pineagent/harness",
     "build": "tsc --noEmit && node build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -14,6 +17,7 @@
     "@aws-sdk/client-dynamodb": "3.1143.0",
     "@aws-sdk/lib-dynamodb": "3.1143.0",
     "@pineagent/core": "*",
+    "@pineagent/harness": "*",
     "jose": "^6.2.12",
     "socket.io": "^4.8.4"
   },

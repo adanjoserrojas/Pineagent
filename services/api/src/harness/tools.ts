@@ -1,8 +1,8 @@
 import { extname } from "node:path";
 import type { Op } from "@pineagent/core/contracts";
 import { MAX_FILE_BYTES, type Workspace } from "@pineagent/core/server";
-import type { FileSnapshot, TestResult, ToolEvent, ToolRuntime } from "../../../../harness/src/types";
-import { taskTerms } from "../../../../harness/src/sandbox-tools";
+import type { FileSnapshot, TestResult, ToolEvent, ToolRuntime } from "@pineagent/harness";
+import { taskTerms } from "../../../../harness/dist/src/sandbox-tools.js";
 
 type Snapshot = { content: string; version: number };
 export type EvidenceVersions = Map<string, Snapshot>;
