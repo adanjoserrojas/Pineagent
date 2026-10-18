@@ -19,7 +19,7 @@ export async function readQuestionEvidence(context: HarnessContext, task: string
   let remaining = 24000;
   for (const path of safe.slice(0, 12)) {
     await boundary();
-    const file = await context.ws.read(path);
+    const file = await context.ws.readUnaliased(path);
     if (!file) continue;
     seen.push({ path, ...file });
     const content = file.content.slice(0, Math.min(6000, remaining));
@@ -27,15 +27,21 @@ export async function readQuestionEvidence(context: HarnessContext, task: string
     remaining -= content.length;
     if (remaining <= 0) break;
   }
+  const assertCurrent = () => {
+    if (!context.ws.matchesReadSnapshots(seen)) throw new Error("Evidence changed; a fresh run is required");
+  };
   return {
     evidence: JSON.stringify({ scope: "Bounded repository sample, not an exhaustive review", files: evidence }),
     paths: evidence.map(file => file.path),
+    assertCurrent,
     async assertFresh() {
       await boundary();
       for (const file of seen) {
-        const current = await context.ws.read(file.path);
+        const current = await context.ws.readUnaliased(file.path);
         if (!current || current.version !== file.version || current.content !== file.content) throw new Error("Evidence changed; a fresh run is required");
       }
+      await boundary();
+      assertCurrent();
     },
   };
 }

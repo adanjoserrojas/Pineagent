@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile, mkdir, symlink, link } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -15,6 +15,8 @@ it("answers through authenticated, bounded reads without routing, locks, patches
   let calls = 0, checks = 0;
   let receipt: Record<string, unknown> | undefined;
   const unexpected = () => { throw new Error("Ask must not use coding capabilities"); };
+  ws.setLeaseFence(unexpected);
+  ws.setWriteFence(unexpected);
   const model = new OpusRun({ runId: "read-only", ownerId: "alice", transport: async input => {
     calls++;
     const prompt = JSON.stringify(input);
@@ -86,4 +88,47 @@ it("caps repository question evidence and excludes hidden/generated and credenti
   expect(data.files.every((file: { truncated: boolean }) => file.truncated)).toBe(true);
   expect(data.files.reduce((sum: number, file: { content: string }) => sum + file.content.length, 0)).toBe(24000);
   expect(result.paths.every(path => files.includes(path))).toBe(true);
+});
+
+it.runIf(process.platform === "linux")("never sends hidden credentials through file, directory or hard-link aliases", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pineagent-ask-alias-"));
+  await mkdir(join(root, ".private"));
+  await writeFile(join(root, ".env"), "NEVER_SEND_ENV");
+  await writeFile(join(root, ".private", "note.md"), "NEVER_SEND_DIRECTORY_SECRET");
+  await writeFile(join(root, "credentials.json"), "NEVER_SEND_HARDLINK_SECRET");
+  await symlink(".env", join(root, "README.md"));
+  await symlink(".private", join(root, "docs"));
+  await link(join(root, "credentials.json"), join(root, "overview.txt"));
+  const ws = new Workspace(root, { leaseMs: 30000, idleMs: 600000 });
+  // Existing browser reads may have cached an alias before Ask starts.
+  expect((await ws.read("README.md"))?.content).toBe("NEVER_SEND_ENV");
+  const result = await readQuestionEvidence({ ws, roomId: "r", files: async () => ["README.md", "docs/note.md", "overview.txt"],
+    events: { run: () => {}, lockChanged: () => {}, fileChanged: () => {} } }, "Explain", async () => {});
+  expect(result.paths).toEqual([]);
+  expect(result.evidence).not.toContain("NEVER_SEND");
+});
+
+it("rejects a change after asynchronous file readbacks and checks cancellation at the final boundary", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pineagent-ask-publish-"));
+  await writeFile(join(root, "README.md"), "Original");
+  const ws = new Workspace(root, { leaseMs: 30000, idleMs: 600000 });
+  let boundaries = 0, changeOnFinal = false;
+  const evidence = await readQuestionEvidence({ ws, roomId: "r", files: async () => ["README.md"],
+    events: { run: () => {}, lockChanged: () => {}, fileChanged: () => {} } }, "Explain", async () => {
+    if (changeOnFinal && ++boundaries === 2) {
+      await ws.acquireSafely("README.md", "file", "bob");
+      await ws.applyOps("README.md", "bob", 1, [{ offset: 0, length: 0, text: "Changed " }]);
+      await ws.releaseSafely("README.md", "bob");
+    }
+  });
+  changeOnFinal = true;
+  await expect(evidence.assertFresh()).rejects.toThrow("Evidence changed");
+  expect(() => evidence.assertCurrent()).toThrow("Evidence changed");
+
+  boundaries = 0;
+  const cancelled = await readQuestionEvidence({ ws, roomId: "r", files: async () => ["README.md"],
+    events: { run: () => {}, lockChanged: () => {}, fileChanged: () => {} } }, "Explain", async () => {
+    if (++boundaries === 4) throw Error("Cancelled during final readback");
+  });
+  await expect(cancelled.assertFresh()).rejects.toThrow("Cancelled during final readback");
 });

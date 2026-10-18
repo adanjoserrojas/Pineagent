@@ -178,6 +178,8 @@ export class LiveHarness implements Harness {
         providerAttempts++;
         const answer = await activeModel.answer({ task: run.view.task, evidence: evidence.evidence }, run.abort.signal);
         await evidence.assertFresh();
+        run.abort.signal.throwIfAborted();
+        evidence.assertCurrent();
         this.emit(run, { state: "done", answer, endedAt: Date.now() });
         return;
       }
