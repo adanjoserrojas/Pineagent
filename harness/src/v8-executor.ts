@@ -74,7 +74,7 @@ export async function collectV8Recovery({ trialRoot, task, limits = V8_RECOVERY_
 // The router itself and its frozen gate are unchanged. An uncertain choice only
 // authorizes reads; neither synthesis nor a writing fallback is reachable yet.
 export async function executeV8Dag({ trialRoot, task, router, candidates, history, synthesize, fallbackAgent,
-  limits = V8_RECOVERY_LIMITS, afterPatch = null, runtimeFactory, language }: V8ExecutionOptions): Promise<{ route: RouteDecision; execution: ExecutionResult }> {
+  limits = V8_RECOVERY_LIMITS, afterPatch = null, runtimeFactory, language, evidenceLimit }: V8ExecutionOptions): Promise<{ route: RouteDecision; execution: ExecutionResult }> {
   const started = performance.now();
   const routingDecisions: RouteDecision[] = [];
   const priors = routeHistoryPriors(history, task.prompt);
@@ -98,7 +98,7 @@ export async function executeV8Dag({ trialRoot, task, router, candidates, histor
   const gateError = new Error("V8 evidence requires approval before synthesis");
   let execution: ExecutionResult;
   try {
-    execution = await executeV7Dag({ trialRoot, task, candidate, history, afterPatch, runtimeFactory, language,
+    execution = await executeV7Dag({ trialRoot, task, candidate, history, afterPatch, runtimeFactory, language, evidenceLimit,
       fallbackAgent: fallbackAgent ? input => fallbackAgent({ ...input, evidencePacket: recovery
         ? `${input.evidencePacket}\n\nBOUNDED READ-ONLY RECOVERY\n${recovery.packet}` : input.evidencePacket }) : null,
       synthesize: async input => {
@@ -109,10 +109,14 @@ export async function executeV8Dag({ trialRoot, task, router, candidates, histor
         const hasSource = language
           ? [...evidence.matchAll(/^FILE ([^\n]+)\n([^\n])/gm)].some(match => language.isSource(match[1]))
           : /^FILE src\/[^\n]+\n[^\n]/m.test(evidence);
-        const hasTest = evidence.includes(`FILE ${task.visibleTestPath}\n`);
-        writeGate = { routeApproved: route.status === "selected", evidenceSufficient: hasSource && hasTest,
+        const plannedFeature = !!task.acceptanceCriteria?.length && !!task.createPaths?.length;
+        const hasTest = evidence.includes(`FILE ${task.visibleTestPath}\n`)
+          || (plannedFeature && task.createPaths!.includes(task.visibleTestPath));
+        const hasPlannedSource = plannedFeature && task.createPaths!.some(file => language?.isSource(file) ?? file.startsWith("src/"));
+        writeGate = { routeApproved: route.status === "selected", evidenceSufficient: (hasSource || hasPlannedSource) && hasTest,
           recoverySufficient: recovery?.sufficient ?? null };
         if (!writeGate.routeApproved || !writeGate.evidenceSufficient || recovery?.sufficient === false) throw gateError;
+        if (evidenceLimit && evidence.length > evidenceLimit) throw new Error("Complete evidence exceeds input budget");
         return synthesize({ ...input, evidence });
       } });
   } catch (error) {

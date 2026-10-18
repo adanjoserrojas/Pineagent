@@ -3,21 +3,29 @@
   "approval": "Owner requested feature building and production hardening on fix/harness-production; DAG candidates and routing thresholds retained",
   "baseManifestSha256": "e8f5d00e46e94be5cb0fd1691b52c63feb611089cb82528c6665888dc0a56fb8",
   "overrides": {
+    "src/index.ts": {
+      "originalSha256": "b697453a53517e2197bc3961d11473effc0bb49db645f6f55a3a5e9f2fd5f33d",
+      "integrationSha256": "5b9afb1c4339a9bc7f035c16a4d2944aba57e468f3ed4e3b3d3cde468aaa9eaa"
+    },
     "src/master-tool-1.ts": {
       "originalSha256": "f2a5b9cbdfae66a2f907fea97f2d2d18f8ad467c33a2f64828273e3874f370c2",
       "integrationSha256": "fab1afb678d1dc2733fefae90335d03fa0f547e03ddc678c31d0f450dc90ad75"
     },
+    "src/sandbox-tools.ts": {
+      "originalSha256": "6495d039b9b615d7ab3bf1b2bb3a3518d9c402e67d4fc16b3f6b0467458b60a9",
+      "integrationSha256": "7beb40ff0280207c1b509fdd0b2b884aa3e9053783d9b0a21e3f87534d75f4f9"
+    },
     "src/types.ts": {
       "originalSha256": "13879d7bbf43aad072eca088f389160e27478e3c91bfe32535b66ee6d20ed2c6",
-      "integrationSha256": "0d636a8d7af98bec8bb42ccc297aa0836820259b77c85208abc68782e6c35ae5"
+      "integrationSha256": "1a1999fdaeeae665606dbcc0ca6c141a7f576b5965e9ad523215931e7e147356"
     },
     "src/v7-executor.ts": {
       "originalSha256": "8337297ca1386727e0d8e5bc246cce3974822eae979e5b624aab08c81b2b902f",
-      "integrationSha256": "001376159e72c51764463e6236f8a91f6fbf6852f5e7b5825a1c8cdb65e258b4"
+      "integrationSha256": "65ee3544cd2157717542f67aefce30eee297005035018a917ab093016335ed7f"
     },
     "src/v8-executor.ts": {
       "originalSha256": "e819eb533163860f229211e854c7fb7d27c4cf53e19413e7b87a705e4b853778",
-      "integrationSha256": "dc0d4ab5d5ce3ac8f392363af3258e7c90de4a9e7e2f147e6c7f0750ac5d00b3"
+      "integrationSha256": "62198cb2e27b5ad38daefb4f480b6b372b17fd968264df1a5dae4dc58c55a1a8"
     },
     "test/freeze-manifest.check.ts": {
       "originalSha256": "130c060ddbc42047ace5b9d5ae65d5eff1a5cebd1d0dcc758628ba4d23b78817",
@@ -25,7 +33,10 @@
     }
   },
   "additions": {
+    "src/evidence-runtime.ts": "a2f79efda77f5e75c95caa0868feeee178a1a05d18ccd0f0d7013eb62cf4e6a0",
+    "src/repository-language.ts": "080328ebb5911d95a363f0b71a09e0d2f24406f2dcdecc83121846d713accff4",
     "test/backend-runtime.test.ts": "8c2aa62bd607838ba77bab486c98eb94ccba0fb81a188fc3be95e3eaf8b7e3db",
+    "test/production-evidence.test.ts": "fa18a7295d461d55e33100b0149d9c5e30995946cb4fcfb9b31c70fb3372cffc",
     "test/router-validation.test.ts": "44d225644baad5ed80bb1819d71c7219f10bb29d6fc3b74df872a65714aa5ce1",
     "docs/INTEGRATION_REVISION_1.md": "ebed0562bb562ecbc5eb07a0e9439f5b0c610113e438b74edd09bee32c891477",
     "docs/INTEGRATION_REVISION_2.md": "c98090641c325412f607efb3c2c610f08b204a97ddfdf0ef56a1cf3ee437e349",

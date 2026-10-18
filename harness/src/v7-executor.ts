@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { SandboxToolRuntime } from "./sandbox-tools.js";
 import { classifyTaskShape, routeHistoryPriors } from "./adaptive-checkpoint.js";
+import { boundedEvidenceRuntime } from "./evidence-runtime.js";
 
 function importsOf(file: string, content: string, available: Set<string>): string[] {
   const found = [];
@@ -14,11 +15,12 @@ function importsOf(file: string, content: string, available: Set<string>): strin
   return found;
 }
 
-export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fallbackAgent, history, adaptive = true, afterPatch = null, chooseExpansion = null, runtimeFactory, language }: DagExecutionOptions): Promise<ExecutionResult> {
+export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fallbackAgent, history, adaptive = true, afterPatch = null, chooseExpansion = null, runtimeFactory, language, evidenceLimit }: DagExecutionOptions): Promise<ExecutionResult> {
   const started = performance.now();
   const injectedRuntime = runtimeFactory?.({ root: trialRoot, allowedWrites: task.allowedWrites, outputLimit: 48000 });
-  const runtime = injectedRuntime ?? new SandboxToolRuntime({ root: trialRoot, allowedWrites: task.allowedWrites, outputLimit: 48000 });
-  const readText = (file: string) => injectedRuntime ? injectedRuntime.readText(file) : fs.readFile(path.join(trialRoot, file), "utf8");
+  const baseRuntime = injectedRuntime ?? new SandboxToolRuntime({ root: trialRoot, allowedWrites: task.allowedWrites, outputLimit: 48000 });
+  const runtime = evidenceLimit ? boundedEvidenceRuntime(baseRuntime, evidenceLimit) : baseRuntime;
+  const readText = (file: string) => evidenceLimit || injectedRuntime ? runtime.readText(file) : fs.readFile(path.join(trialRoot, file), "utf8");
   const allFiles = await runtime.listFiles(), available = new Set(allFiles);
   const isSource = language?.isSource ?? ((file: string) => file.startsWith("src/"));
   const dependencies = language?.references ?? importsOf;
@@ -43,7 +45,8 @@ export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fal
     let seeds = (symbolHits.length ? symbolHits : ranked.filter(r => isSource(r.path))).slice(0, label === "targeted_symbol_search" ? 2 : 5).map(r => r.path);
     if (label !== "targeted_symbol_search") seeds = [task.visibleTestPath, ...seeds];
     if (label === "failure_first_diagnosis") {
-      const failing = await runtime.runTests(task.visibleTestPath);
+      const failing = available.has(task.visibleTestPath) ? await runtime.runTests(task.visibleTestPath)
+        : { exitCode: 1, output: "The planned acceptance test has not been created yet." };
       discoveries.push({ route: label, exitCode: failing.exitCode, output: failing.output.slice(-3500) });
     }
     if (label === "repository_flow_mapping") {
@@ -59,7 +62,8 @@ export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fal
       seeds = [...wanted];
     }
     const manifests = language ? language.manifests.filter(file => available.has(file)) : ["package.json"];
-    const ordered = [...new Set([task.visibleTestPath, ...seeds, ...manifests])].filter(Boolean);
+    const ordered = [...new Set([task.visibleTestPath, ...(evidenceLimit ? task.allowedWrites : []), ...seeds, ...manifests])]
+      .filter(file => file && (!task.createPaths?.includes(file) || available.has(file)));
     // readFiles caps each batch at 12. Explicit batches preserve the 40-file bound.
     for (let i = 0; i < Math.min(ordered.length, 40); i += 12) {
       for (const file of await runtime.readFiles(ordered.slice(i, i + 12))) files.set(file.path, file.content);
@@ -93,15 +97,19 @@ export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fal
     }
   }
   const evidence = [
+    ...(task.acceptanceCriteria?.length ? [`Acceptance criteria:\n${task.acceptanceCriteria.map((value, i) => `${i + 1}. ${value}`).join("\n")}`] : []),
+    ...(task.createPaths?.length ? [`Planned new files (must all be implemented): ${JSON.stringify(task.createPaths)}`] : []),
     `Repository: ${allFiles.length} files. Exact-symbol candidates: ${JSON.stringify(symbolHits.slice(0, 8))}`,
     `Executed routes: ${routes.join(", ")}. Checkpoints: ${JSON.stringify(checkpoints)}`,
     ...discoveries.map(d => JSON.stringify(d)),
     ...[...files].map(([file, content]) => `FILE ${file}\n${content}`),
     "Cross-file change contract: trace imports and callers, preserve exports, validate at the correct layer, and propagate the value to every public consumer. Implement all task requirements, including edge cases.",
   ].join("\n\n");
+  if (evidenceLimit && evidence.length > evidenceLimit) throw new Error("Complete evidence exceeds input budget");
   modelCalls += 1;
   try {
     patch = await synthesize({ task: task.prompt, evidence });
+    if (task.createPaths?.some(path => !patch!.files.some(file => file.path === path))) throw new Error("Feature patch omitted a planned new file");
     await runtime.writeFiles(patch.files);
   } catch (error) {
     const recoverable = /Patch contained no files|Patch response did not contain output text|Unexpected token.*JSON/i.test(String((error as Error).message));

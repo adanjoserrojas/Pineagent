@@ -10,3 +10,4 @@ export { executeV8Dag, collectV8Recovery, V8_RECOVERY_LIMITS } from "./v8-execut
 export { SandboxToolRuntime } from "./sandbox-tools.js";
 export { routeHistoryPriors, classifyTaskShape, evaluateEvidenceCheckpoint } from "./adaptive-checkpoint.js";
 export { synthesizePatch, createResponse, responseUsage } from "./openai-response-client.js";
+export { javascriptLanguage, isJavaScriptTest } from "./repository-language.js";

@@ -135,6 +135,13 @@ export class SandboxToolRuntime {
     });
   }
 
+  async readText(relative: string): Promise<string> {
+    const { absolute } = this.resolve(relative);
+    const info = await fs.lstat(absolute);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 1_000_000) throw new Error("Unsupported evidence file");
+    return fs.readFile(absolute, "utf8");
+  }
+
   async writeFiles(files: FileSnapshot[]): Promise<string[]> {
     return this.record("write_files", { paths: files.map((file) => file.path) }, async () => {
       if (!Array.isArray(files) || files.length === 0) throw new Error("Patch contained no files");

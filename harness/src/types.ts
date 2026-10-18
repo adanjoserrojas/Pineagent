@@ -19,6 +19,9 @@ export interface DagCandidate {
 }
 export interface HarnessTask {
   id?: string; prompt: string; allowedWrites: string[]; visibleTestPath: string;
+  /** Explicitly planned absent paths; existing tests never belong here. */
+  createPaths?: string[];
+  acceptanceCriteria?: string[];
 }
 export interface TokenUsage {
   inputTokens: number | null; outputTokens: number | null;
@@ -103,6 +106,7 @@ export interface ExecutionResult {
   routingDecisions?: RouteDecision[]; recovery?: Recovery | null; writeGate?: WriteGate | null;
 }
 export interface DagExecutionOptions {
+  evidenceLimit?: number;
   language?: RepositoryLanguage;
   runtimeFactory?: ToolRuntimeFactory;
   trialRoot: string; task: HarnessTask; candidate: DagCandidate; synthesize: Synthesize;
@@ -111,6 +115,7 @@ export interface DagExecutionOptions {
   chooseExpansion?: ((input: { task: HarnessTask; executedRoutes: string[]; unresolved: string[]; options: ExpansionOption[] }) => Promise<RouteDecision>) | null;
 }
 export interface V8ExecutionOptions {
+  evidenceLimit?: number;
   language?: RepositoryLanguage;
   runtimeFactory?: ToolRuntimeFactory;
   trialRoot: string; task: HarnessTask & { id: string }; router: Router; candidates: DagCandidate[];
