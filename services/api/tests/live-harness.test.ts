@@ -92,6 +92,7 @@ it("runs the frozen DAG as the authenticated owner and publishes monotonic works
   for (const [path, content] of Object.entries(files)) await writeFile(join(root, path), content);
   const ws = new Workspace(root, { leaseMs: 30_000, idleMs: 600_000 });
   const events: RunEvent[] = [];
+  const receipts: Record<string, unknown>[] = [];
   let patches = 0;
   const harness = new LiveHarness({
     context: { ws, roomId: "room", files: async () => Object.keys(files), events: { run: event => { events.push(event); }, lockChanged: () => {}, fileChanged: () => {} } },
@@ -99,6 +100,7 @@ it("runs the frozen DAG as the authenticated owner and publishes monotonic works
       patch: async () => { patches++; return { files: [{ path: "src/value.mjs", content: "export function value() { return 2; }" }] }; } }),
     router: () => ({ route: async ({ candidates }) => ({ status: "selected", candidateId: candidates.find(c => c.routeLabel === "targeted_symbol_search")!.id, routerMode: "openai" }) }),
     runTests: async () => ({ exitCode: 0, output: "pass" }),
+    receipt: (_id, result) => { receipts.push(result); },
   });
   try {
     const started = harness.start({ id: "alice", name: "Alice" }, "Fix value().");
@@ -110,4 +112,5 @@ it("runs the frozen DAG as the authenticated owner and publishes monotonic works
     expect(ws.allLocks()).toEqual([]);
     expect(events.every((event, index) => index === 0 || event.seq > events[index - 1].seq)).toBe(true);
   } finally { await harness.close(); }
+  expect(receipts).toMatchObject([{ modelCalls: 2, executorModelCalls: 1, status: "done" }]);
 });

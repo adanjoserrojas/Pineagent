@@ -200,13 +200,14 @@ export function createGateway(opts: GatewayOptions) {
     log("socket.connected", { user: user.id });
     const joined = async (writing = false) => {
       const id = socket.data.room;
+      const scope = socket.data.scope;
       const r = id ? await existing(id)?.catch(() => null) : null;
-      if (!active(user) || !socket.connected) return null;
+      if (!active(user) || !socket.connected || socket.data.room !== id || socket.data.scope !== scope) return null;
       if (writing && r && opts.authorize) {
-        const scope = socket.data.scope;
         if (!scope || await opts.authorize({ ...scope, roomId: r.id, user }).catch(() => "UNAVAILABLE") !== "ok") return null;
       }
-      return r ? { room: r.id, ...r } : null;
+      if (socket.data.room !== id || socket.data.scope !== scope) return null;
+      return r ? { room: r.id, scope, ...r } : null;
     };
 
     // Token bucket per socket: refills EVENTS_PER_SEC, holds EVENT_BURST.
@@ -229,6 +230,9 @@ export function createGateway(opts: GatewayOptions) {
       if (typeof wsId !== "string" || typeof branch !== "string" || !NAME.test(wsId) || !BRANCH.test(branch)) {
         return ack({ ok: false, code: "NOT_COLLABORATOR" });
       }
+      // GitHub repository identifiers are case-insensitive, just like prepare's
+      // disk path. One physical tree must have exactly one room authority.
+      wsId = wsId.toLowerCase();
       const room = roomName(wsId, branch);
       if (user.session && user.session.roomId !== room) return ack({ ok: false, code: "NOT_COLLABORATOR" });
       const ctx = { roomId: room, wsId, branch, user };
@@ -284,7 +288,7 @@ export function createGateway(opts: GatewayOptions) {
       // Malformed requests get no ack; the client's timeout handles it.
       if (!j || (kind !== "file" && kind !== "dir") || !j.ws.resolvePath(target) || (kind === "dir" && !path.endsWith("/"))) return;
       let res;
-      try { res = await j.ws.acquireSafely(path, kind, user.id, () => active(user) && socket.connected); }
+      try { res = await j.ws.acquireSafely(path, kind, user.id, () => active(user) && socket.connected && socket.data.scope === j.scope); }
       catch { log("sandbox.fence_failed", { room: j.room, operation: "acquire" }); socket.disconnect(true); return; }
       await j.ws.lockSaved(path); // written through before the ack (contract rule 5)
       if (res.ok) {
@@ -298,7 +302,7 @@ export function createGateway(opts: GatewayOptions) {
     socket.on("lock:release", async ({ path }, ack) => {
       const j = await joined(true);
       let released;
-      try { released = await j?.ws.releaseSafely(path, user.id, () => active(user) && socket.connected); }
+      try { released = await j?.ws.releaseSafely(path, user.id, () => active(user) && socket.connected && socket.data.scope === j.scope); }
       catch { log("sandbox.fence_failed", { room: j?.room, operation: "release" }); socket.disconnect(true); return; }
       if (released) await j!.ws.lockSaved(path);
       ack({ ok: true });
@@ -320,7 +324,7 @@ export function createGateway(opts: GatewayOptions) {
         return ack({ ok: false, code: "STALE", currentVersion: 0 });
       }
       let res;
-      try { res = await j.ws.applyOps(path, user.id, baseVersion, ops, undefined, () => active(user) && socket.connected); }
+      try { res = await j.ws.applyOps(path, user.id, baseVersion, ops, undefined, () => active(user) && socket.connected && socket.data.scope === j.scope); }
       catch { log("workspace.write_failed", { room: j.room }); socket.disconnect(true); return; }
       ack(res);
       if (res.ok) {
@@ -333,7 +337,7 @@ export function createGateway(opts: GatewayOptions) {
     socket.on("tree:create", async ({ path, kind }, ack) => {
       const j = await joined(true);
       if (!j || (kind !== "file" && kind !== "dir")) return ack({ ok: false, code: "INVALID" });
-      const res = await j.ws.create(path, kind, user.id, () => active(user) && socket.connected)
+      const res = await j.ws.create(path, kind, user.id, () => active(user) && socket.connected && socket.data.scope === j.scope)
         .catch(() => ({ ok: false as const, code: "INVALID" as const }));
       ack(res);
       if (!res.ok) return;
@@ -401,13 +405,14 @@ export function createGateway(opts: GatewayOptions) {
       if (terminalBusy || typeof line !== "string" || Buffer.byteLength(line) > 8000) return ack({ ok: false, code: "REFUSED" });
       terminalBusy = true;
       const room = socket.data.room;
+      const scope = socket.data.scope;
       try {
         const j = await joined();
         if (!j || !active(user)) return ack({ ok: false, code: "REFUSED" });
         const request = await opts.terminal(j.ws, user.id, line);
         // Reuse authenticated browser handlers; the CLI has no direct write path.
         const allowed = new Set(["run:start", "run:list", "run:pause", "run:resume", "run:approve", "file:snapshot", "lock:acquire", "lock:release", "git:status"]);
-        if (!allowed.has(request.event) || socket.data.room !== room || !socket.connected || !active(user)) return ack({ ok: false, code: "REFUSED" });
+        if (!allowed.has(request.event) || socket.data.room !== room || socket.data.scope !== scope || !socket.connected || !active(user)) return ack({ ok: false, code: "REFUSED" });
         const handlers = socket.listeners(request.event as keyof ClientToServerEvents);
         const handler = handlers[0] as unknown as (body: Record<string, unknown>, done: (result: unknown) => void) => Promise<void>;
         if (!handler) return ack({ ok: false, code: "REFUSED" });

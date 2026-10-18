@@ -5,8 +5,10 @@ import type { RunActionAck, RunStartAck, RunView } from "@pineagent/core/contrac
 import { executeV8Dag, selectCandidateDags, prototypeTools, FROZEN_HISTORY,
   type Router, type RouteDecision, type Patch, type TestResult, type DagCandidate } from "@pineagent/harness";
 import { BackendTools, type EvidenceVersions } from "./tools";
+import type { ModelReceipt } from "../models/bedrock";
 
 type Model = {
+  receipts?(): ModelReceipt[];
   plan(task: string, files: string[], signal?: AbortSignal): Promise<{ allowedWrites: string[]; visibleTestPath: string }>;
   patch(input: { task: string; evidence: string; allowedWrites: string[] }, signal?: AbortSignal, recovery?: boolean): Promise<Patch>;
 };
@@ -112,6 +114,9 @@ export class LiveHarness implements Harness {
     const { context } = this.options;
     const { ownerId, runId } = run.view;
     const timeout = setTimeout(() => run.abort.abort(), 15 * 60_000);
+    let providerAttempts = 0;
+    let executorModelCalls = 0;
+    let model: Model | undefined;
     let observations: EvidenceVersions = new Map();
     const boundary = async () => {
       run.abort.signal.throwIfAborted();
@@ -133,13 +138,15 @@ export class LiveHarness implements Harness {
         this.emit(run, { nodeIndex: i >= 0 ? i : run.view.nodeIndex });
       } });
     try {
-      const model = this.options.model(ownerId, runId);
+      const activeModel = this.options.model(ownerId, runId);
+      model = activeModel;
       const scorer = this.options.router(ownerId, runId);
       planning: while (true) {
         await boundary();
         this.emit(run, { state: "planning" });
         const files = await runtime([]).listFiles();
-        const plan = await model.plan(run.view.task, files, run.abort.signal);
+        providerAttempts++;
+        const plan = await activeModel.plan(run.view.task, files, run.abort.signal);
         if (!plan.allowedWrites.length || plan.allowedWrites.length > 12 || plan.allowedWrites.some(p => !files.includes(p))
           || !files.includes(plan.visibleTestPath) || plan.allowedWrites.includes(plan.visibleTestPath)) throw new Error("Invalid plan");
         run.view.writeSet = [...new Set(plan.allowedWrites)];
@@ -165,18 +172,19 @@ export class LiveHarness implements Harness {
             task: { id: runId, prompt: run.view.task, ...plan }, candidates: run.candidates, router, history: FROZEN_HISTORY,
             runtimeFactory: ({ allowedWrites, outputLimit }) => runtime(allowedWrites, outputLimit),
             synthesize: async input => { await boundary(); await runtime([]).assertFresh();
-              return model.patch({ ...input, allowedWrites: plan.allowedWrites }, run.abort.signal); },
+              providerAttempts++;
+              return activeModel.patch({ ...input, allowedWrites: plan.allowedWrites }, run.abort.signal); },
             fallbackAgent: async input => {
               await boundary(); this.emit(run, { codingRecovery: "warm_agent" });
               const tools = runtime(plan.allowedWrites);
               await tools.assertFresh();
-              const patch = await model.patch({ task: run.view.task, evidence: input.evidencePacket, allowedWrites: plan.allowedWrites }, run.abort.signal, true);
+              providerAttempts++;
+              const patch = await activeModel.patch({ task: run.view.task, evidence: input.evidencePacket, allowedWrites: plan.allowedWrites }, run.abort.signal, true);
               await tools.writeFiles(patch.files);
               return { status: "patched", modelCalls: 1, usage: patch.usage };
             },
           });
-          this.options.receipt?.(runId, { status: result.execution.status, modelCalls: result.execution.modelCalls,
-            routerMode: run.view.routerMode, codingRecovery: run.view.codingRecovery, wallMs: result.execution.wallMs });
+          executorModelCalls += result.execution.modelCalls;
           if (result.execution.status === "awaiting_approval") {
             await this.release(run);
             const candidates = run.candidates.map(c => ({ id: c.id, score: result.route.probabilities?.[c.id] ?? 0, steps: steps(c) }))
@@ -210,6 +218,10 @@ export class LiveHarness implements Harness {
       clearTimeout(timeout);
       try { await this.release(run); }
       catch { this.emit(run, { state: "error", error: { nodeIndex: run.view.nodeIndex, message: "Sandbox revocation failed; locks retained. Operator intervention required." } }); }
+      const ledger = model?.receipts?.();
+      this.options.receipt?.(runId, { status: run.view.state, modelCalls: ledger?.length ?? providerAttempts, modelAttempts: providerAttempts, executorModelCalls,
+        modelReceipts: ledger,
+        routerMode: run.view.routerMode, codingRecovery: run.view.codingRecovery, wallMs: Date.now() - run.view.startedAt });
     }
   }
 
