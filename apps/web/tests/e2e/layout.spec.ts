@@ -41,3 +41,19 @@ test("panels resize with pointer and keyboard, collapse, restore, and persist", 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: "test-results/crown-layout.png" });
 });
+
+test("an individual agent run collapses without losing its approval draft", async ({ page }) => {
+  await page.goto(home("alice"));
+  await expect(page.getByTestId("connection")).toHaveText("Connected");
+  await page.getByLabel("Ask your agent").fill("unsure update db.ts");
+  await page.getByRole("button", { name: "Start run" }).click();
+  await expect(page.getByTestId("run-state")).toHaveText("needs a choice");
+  await page.getByLabel("None of these").check();
+  const hint = page.getByRole("textbox", { name: "What should it do instead?" });
+  await hint.fill("Keep the existing interface");
+  await page.getByRole("button", { name: /^Collapse run/ }).click();
+  await expect(hint).toBeHidden();
+  await expect(page.getByTestId("run-state")).toHaveText("needs a choice");
+  await page.getByRole("button", { name: /^Expand run/ }).click();
+  await expect(hint).toHaveValue("Keep the existing interface");
+});

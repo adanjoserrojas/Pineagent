@@ -1,5 +1,5 @@
 import { DEV_TOOLS } from "../devtools";
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import type { Member, RouterMode, RunActionAck, RunState, RunView } from "../contracts/socket";
 import type { WorkspaceSocket } from "../net/socket";
 import { faceInfo, VirtualPlant } from "../plant/VirtualPlant";
@@ -139,6 +139,8 @@ function RunCard({
   nameOf: (id: string) => string;
 }) {
   const [busy, setBusy] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const detailsId = useId();
   const [problem, setProblem] = useState<string | null>(null);
   const owner = members.find((m) => m.userId === run.ownerId);
   const chip = faceInfo(faceFor(run));
@@ -171,10 +173,12 @@ function RunCard({
         <span className="run-chip" style={{ background: chip.background }} data-testid="run-state">
           {STATE_LABEL[run.state]}
         </span>
+        <button type="button" className="run-disclosure" aria-label={`${collapsed ? "Expand" : "Collapse"} run ${shortId(run.runId)}`}
+          aria-expanded={!collapsed} aria-controls={detailsId} onClick={() => setCollapsed((value) => !value)}>{collapsed ? "›" : "⌄"}</button>
       </header>
 
       <p className="run-task">{run.task}</p>
-
+      <div className="run-details" id={detailsId} hidden={collapsed}>
       <div className="run-badges">
         <span className="run-id mono">run {shortId(run.runId)}</span>
         {run.routerMode && (
@@ -253,6 +257,7 @@ function RunCard({
           {problem}
         </p>
       )}
+      </div>
     </article>
   );
 }

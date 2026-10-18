@@ -365,6 +365,10 @@ button:not(:disabled):hover.btn-primary { background: #e4efa9; }
 .run-step > .mono { padding-top: 2px; font-size: 11px; overflow-wrap: anywhere; min-width: 0; }
 .run-step-detail { display: block; margin-top: 3px; line-height: 1.6; }
 .run-actions > button { width: 100%; }
+.run-details { display: flex; flex-direction: column; gap: 10px; }
+.run-details[hidden] { display: none; }
+.run-disclosure { width: 28px; height: 28px; background: transparent; color: var(--muted); border: 1px solid var(--line); cursor: pointer; font-size: 19px; line-height: 1; }
+.run-disclosure:hover { color: var(--action); background: var(--raised); }
 @media (prefers-reduced-motion: no-preference) {
   .ownership-writing > svg { animation: ownership-settle 240ms ease-out; }
 }
