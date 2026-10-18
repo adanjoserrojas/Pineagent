@@ -1,15 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
-import { home } from "./rooms";
+import { home, openFile } from "./rooms";
 import { startMock } from "../../mock/server";
 
 process.env.MOCK_AVATARS = "0";
 
-const row = (page: Page, path: string) => page.getByRole("tree", { name: "Files" }).locator(`[data-path="${path}"]`);
 const code = (page: Page) => page.locator(".monaco-editor .view-lines");
 
 test("fast switches keep the same editor and never flash a loading state", async ({ page }) => {
   await page.goto(home("alice"));
-  await row(page, "src/auth.ts").click();
+  await openFile(page, "src/auth.ts");
   await expect(code(page)).toContainText("currentUser");
 
   // Tag the element Monaco was mounted into (Monaco rebuilds its inner .monaco-editor view on every
@@ -26,7 +25,7 @@ test("fast switches keep the same editor and never flash a loading state", async
   });
 
   for (const [path, text] of [["src/db.ts", "rows"], ["src/jwt.ts", "verifyToken"], ["src/auth.ts", "currentUser"]]) {
-    await row(page, path).click();
+    await openFile(page, path);
     await expect(code(page)).toContainText(text);
   }
   await expect(page.locator('[data-instance="first"] > .monaco-editor')).toHaveCount(1);
@@ -36,16 +35,16 @@ test("fast switches keep the same editor and never flash a loading state", async
 test("a slow load dims the previous file, then shows the new one", async ({ page }) => {
   const mock = await startMock({ port: 0, snapshotDelayMs: 900 });
   await page.goto(`/?as=alice&api=http://localhost:${mock.port}`);
-  await row(page, "src/auth.ts").click();
+  await openFile(page, "src/auth.ts");
   await expect(code(page)).toContainText("currentUser", { timeout: 15_000 }); // cold Monaco + 900 ms server
 
-  await row(page, "src/db.ts").click();
+  await openFile(page, "src/db.ts");
   await expect(page.locator(".editor-loading")).toHaveText("Loading src/db.ts…");
   await expect(code(page)).toContainText("rows");
   await expect(page.locator(".editor-loading")).toHaveCount(0);
 
   // Revisiting a cached file is instant even though the server is still slow.
-  await row(page, "src/auth.ts").click();
+  await openFile(page, "src/auth.ts");
   await expect(code(page)).toContainText("currentUser", { timeout: 500 }); // server takes 900 ms, so this proves the cache
   await mock.close();
 });

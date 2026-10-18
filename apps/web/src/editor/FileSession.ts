@@ -59,6 +59,7 @@ export class FileSession {
   // a batch twice, so tick() waits.
   private recovering = false;
   private sink: EditorSink | null = null;
+  private readonly views = new Set<EditorSink>();
   private readonly listeners = new Set<() => void>();
 
   constructor(
@@ -82,13 +83,30 @@ export class FileSession {
     this.sink = sink;
   }
 
+  // Independent Monaco models can display one session. Unmounting one view must not
+  // detach another or turn one keystroke into two network operations.
+  attachView(sink: EditorSink): () => void {
+    this.views.add(sink);
+    sink.replace(this.state.text);
+    return () => { this.views.delete(sink); };
+  }
+
+  private replaceViews(text: string) {
+    this.sink?.replace(text);
+    this.views.forEach((view) => view.replace(text));
+  }
+
+  private applyToViews(ops: Op[], source?: EditorSink) {
+    this.views.forEach((view) => { if (view !== source) view.apply(ops); });
+  }
+
   private set(patch: Partial<SessionState>) {
     this.state = { ...this.state, ...patch, inFlight: Boolean(this.inflight) };
     this.listeners.forEach((l) => l());
   }
 
   private showText(text: string) {
-    if (text !== this.state.text) this.sink?.replace(text);
+    if (text !== this.state.text) this.replaceViews(text);
     this.set({ text });
   }
 
@@ -131,7 +149,7 @@ export class FileSession {
   // --- Inputs -----------------------------------------------------------------------------
 
   // The user typed; the editor has already applied `ops` to its buffer.
-  localEdit(ops: Op[]) {
+  localEdit(ops: Op[], source?: EditorSink) {
     this.releaseRequested = false;
     const text = applyOps(this.state.text, ops);
     if (text === null) return void this.load(); // editor and session disagree: resync
@@ -140,11 +158,12 @@ export class FileSession {
         const { other } = this.lockState();
         if (other) {
           // The lock map already shows a holder: no optimistic edit (contract, D1).
-          this.sink?.replace(this.state.text);
+          this.replaceViews(this.state.text);
           this.set({ status: "readonly", holder: other });
           return;
         }
         this.pending.push(...ops);
+        this.applyToViews(ops, source);
         this.set({ status: "acquiring", text });
         void this.acquire();
         return;
@@ -152,11 +171,12 @@ export class FileSession {
       case "acquiring":
       case "writing":
         this.pending.push(...ops);
+        this.applyToViews(ops, source);
         this.set({ text });
         return;
       default:
         // The editor should have been read-only; undo the keystroke.
-        this.sink?.replace(this.state.text);
+        this.replaceViews(this.state.text);
     }
   }
 
@@ -202,6 +222,7 @@ export class FileSession {
     if (next === null) return void this.load();
     this.base = next;
     this.sink?.apply(m.ops);
+    this.applyToViews(m.ops);
     this.set({ text: next, version: m.version });
   }
 

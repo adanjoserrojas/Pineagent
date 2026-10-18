@@ -1,9 +1,9 @@
-import { cp, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
-import { MAX_FILE_BYTES, MemoryStore, Workspace, type RoomStore } from "@pineagent/core/server";
+import { MAX_FILE_BYTES, MAX_IMAGE_BYTES, MemoryStore, Workspace, type RoomStore } from "@pineagent/core/server";
 import { applyOps } from "@pineagent/core/ops";
 
 const FIXTURE = fileURLToPath(new URL("../../mock/fixtures/demo-repo", import.meta.url));
@@ -176,6 +176,34 @@ describe("files a real repository can contain", () => {
     expect(await ws.read("logo.png")).toBeNull(); // so file:ops can't touch it either
   });
 
+  it("serves allowed image files as base64 with a mime type", async () => {
+    const res = await ws.image("images/logo.png");
+    expect(res).toMatchObject({ ok: true, mime: "image/png", bytes: expect.any(Number) });
+    if (!res.ok) return;
+    expect(Buffer.from(res.data, "base64").subarray(1, 4).toString()).toBe("PNG");
+    expect(await ws.image("images/mark.svg")).toMatchObject({ ok: true, mime: "image/svg+xml" });
+    await writeFile(join(ws.root, "UP.JPG"), Buffer.from([0xff, 0xd8, 0xff]));
+    expect(await ws.image("UP.JPG")).toMatchObject({ ok: true, mime: "image/jpeg", bytes: 3 });
+  });
+
+  it("refuses images with other extensions, oversized images, and missing files", async () => {
+    expect(await ws.image("README.md")).toEqual({ ok: false, code: "UNSUPPORTED" });
+    await writeFile(join(ws.root, "big.png"), Buffer.alloc(MAX_IMAGE_BYTES + 1));
+    expect(await ws.image("big.png")).toEqual({ ok: false, code: "TOO_LARGE" });
+    expect(await ws.image("nope.png")).toEqual({ ok: false, code: "NOT_FOUND" });
+    expect(await ws.image("images/")).toEqual({ ok: false, code: "NOT_FOUND" });
+    expect(await ws.image("../x.png")).toEqual({ ok: false, code: "NOT_FOUND" });
+  });
+
+  it("won't follow an image symlink out of the workspace", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "pineagent-outside-"));
+    await writeFile(join(outside, "secret.png"), Buffer.from([1, 2, 3]));
+    await symlink(join(outside, "secret.png"), join(ws.root, "leak.png"));
+    await symlink(outside, join(ws.root, "leakdir"));
+    expect(await ws.image("leak.png")).toEqual({ ok: false, code: "NOT_FOUND" });
+    expect(await ws.image("leakdir/secret.png")).toEqual({ ok: false, code: "NOT_FOUND" });
+  });
+
   it("refuses an edit that would grow a file past the limit", async () => {
     ws.acquire("README.md", "file", ALICE);
     const res = await ws.applyOps("README.md", ALICE, 1, [{ offset: 0, length: 0, text: "x".repeat(MAX_FILE_BYTES) }]);
@@ -286,5 +314,51 @@ describe("restart recovery (store written through, memory stays the authority)",
     a.acquire("src/auth.ts", "file", ALICE);
     await a.applyOps("src/auth.ts", ALICE, 1, [{ offset: 0, length: 0, text: "A" }]);
     expect(seen).toEqual(["v2 saved while disk lacked the edit"]);
+  });
+});
+
+describe("creating files and folders (tree:create)", () => {
+  it("makes an empty file, and its missing folders, that the creator can edit and commit", async () => {
+    expect(await ws.create("src/utils/date.ts", "file", ALICE)).toEqual({ ok: true, path: "src/utils/date.ts" });
+    expect(await readFile(join(ws.root, "src/utils/date.ts"), "utf8")).toBe("");
+    expect(await ws.read("src/utils/date.ts")).toEqual({ content: "", version: 1 });
+    expect(ws.editorsOf("src/utils/date.ts")).toEqual([ALICE]);
+    ws.acquire("src/utils/date.ts", "file", ALICE);
+    expect(await ws.applyOps("src/utils/date.ts", ALICE, 1, [{ offset: 0, length: 0, text: "x" }])).toEqual({ ok: true, version: 2 });
+  });
+
+  it("makes a folder, named with a trailing slash like a folder lock", async () => {
+    expect(await ws.create("docs/notes", "dir", ALICE)).toEqual({ ok: true, path: "docs/notes/" });
+    expect((await stat(join(ws.root, "docs/notes"))).isDirectory()).toBe(true);
+    expect(await ws.create("docs/notes/", "dir", BOB)).toEqual({ ok: false, code: "EXISTS" });
+  });
+
+  it("refuses names that exist, escape, touch .git, or sit inside a file", async () => {
+    expect(await ws.create("src/auth.ts", "file", ALICE)).toEqual({ ok: false, code: "EXISTS" });
+    expect(await ws.create("src/auth.ts/inner.ts", "file", ALICE)).toEqual({ ok: false, code: "EXISTS" });
+    for (const bad of ["../escape.ts", "/etc/x", "src/../../x", ".git/hooks/x", "a//b", "a/./b", ""]) {
+      expect(await ws.create(bad, "file", ALICE)).toEqual({ ok: false, code: "INVALID" });
+    }
+  });
+
+  it("won't create through a symlink that leaves the workspace", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "pineagent-outside-"));
+    await symlink(outside, join(ws.root, "out"));
+    expect(await ws.create("out/new/x.ts", "file", ALICE)).toEqual({ ok: false, code: "INVALID" });
+    expect(await stat(join(outside, "new")).catch(() => null)).toBeNull();
+  });
+
+  it("refuses inside a folder someone else holds, but not your own", async () => {
+    ws.acquire("src/routes/", "dir", BOB);
+    expect(await ws.create("src/routes/new.ts", "file", ALICE)).toEqual({ ok: false, code: "LOCKED" });
+    expect(await ws.create("src/routes/new.ts", "file", BOB)).toMatchObject({ ok: true });
+  });
+
+  it("a re-created path continues the old version, so old snapshots go stale", async () => {
+    ws.acquire("README.md", "file", ALICE);
+    await ws.applyOps("README.md", ALICE, 1, [{ offset: 0, length: 0, text: "x" }]);
+    await rm(join(ws.root, "README.md")); // deleted outside the editor; the server still knows v2
+    expect(await ws.create("README.md", "file", ALICE)).toMatchObject({ ok: true });
+    expect(await ws.read("README.md")).toEqual({ content: "", version: 3 });
   });
 });

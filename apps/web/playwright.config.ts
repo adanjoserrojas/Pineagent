@@ -2,8 +2,9 @@ import { defineConfig, devices } from "@playwright/test";
 
 // e2e runs its own mock and Vite on separate ports, so it never shares a room with a developer's
 // signed-in session on the default dev servers (3001 / 5173).
-const MOCK_PORT = 3101;
-const WEB_PORT = 5174;
+// E2E_MOCK_PORT / E2E_WEB_PORT let several checkouts run e2e at once.
+const MOCK_PORT = Number(process.env.E2E_MOCK_PORT ?? 3101);
+const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5174);
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -12,7 +13,8 @@ export default defineConfig({
   // Several browsers loading Monaco cold from the Vite dev server can take longer than the 5 s default.
   expect: { timeout: 10_000 },
   use: { baseURL: `http://localhost:${WEB_PORT}`, trace: "retain-on-failure" },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // Use an installed Chromium browser on machines without Playwright's bundled browser.
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], channel: process.env.PLAYWRIGHT_CHANNEL || undefined } }],
   webServer: [
     {
       command: "npx tsx mock/server.ts",

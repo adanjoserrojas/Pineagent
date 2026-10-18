@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { GitRepo } from "@pineagent/core/server";
+import { openFile } from "./rooms";
 import { startMock } from "../../mock/server";
 
 // Release scenario 7: one user cannot commit another user's uncommitted paths.
@@ -30,7 +31,7 @@ async function joinAs(browser: Browser, name: string): Promise<Page> {
 }
 
 async function editFile(page: Page, path: string, text: string) {
-  await page.locator(`[data-path="${path}"]`).click();
+  await openFile(page, path);
   await expect(page.getByTestId("editor-status")).toContainText("Viewing", { timeout: 15_000 }); // first Monaco load can be slow
   await page.locator(".monaco-editor .view-line").first().click({ position: { x: 2, y: 5 } });
   await page.keyboard.press("Home");
@@ -39,7 +40,7 @@ async function editFile(page: Page, path: string, text: string) {
 
 const dialog = (page: Page) => page.getByRole("dialog", { name: /Commit to/ });
 async function openDialog(page: Page) {
-  await page.getByRole("button", { name: "Commit…" }).click();
+  await page.getByRole("button", { name: /^Commit, / }).click();
   await expect(dialog(page).getByText(/Your changes/)).toBeVisible();
 }
 const repo = async () => (await mock.room(ROOM)).repo;
@@ -85,7 +86,8 @@ test("the last keystrokes before committing are in the commit", async ({ browser
   await dialog(alice).getByRole("button", { name: "Commit 1 file" }).click();
   await expect(dialog(alice).getByText(/^Committed/)).toBeVisible();
   const committed = await (await repo()).run(["show", "HEAD:src/auth.ts"]);
-  expect(committed.startsWith("// typed right before committing!\n")).toBe(true);
+  // The mock copies the checkout's line endings; Windows fixtures may be CRLF.
+  expect(committed).toMatch(/^\/\/ typed right before committing!\r?\n/);
 });
 
 test("commit and push lands on the remote", async ({ browser }) => {

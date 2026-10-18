@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { openFile } from "./rooms";
 import { startMock, type MockOptions } from "../../mock/server";
 
 // Contract acceptance tests L1, L2, L4, F1, F3, F4 (SOCKET_LOCKS_AND_FILES.md) with two real
@@ -32,7 +33,7 @@ async function openAs(browser: Browser, name: string): Promise<Page> {
   contexts.push(context);
   const page = await context.newPage();
   await page.goto(`/?as=${name}&api=http://localhost:${mock.port}`);
-  await page.locator(`[data-path="${PATH}"]`).click();
+  await openFile(page, PATH);
   await expect(page.locator(".monaco-editor .view-lines")).toContainText("currentUser", { timeout: 15_000 }); // first Monaco load can be slow
   await expect(status(page)).toContainText("Viewing");
   return page;
@@ -119,7 +120,7 @@ test("F3: a viewer who reloads mid-edit rejoins and catches up", async ({ browse
   await alice.keyboard.type("before reload ");
   await bob.reload();
   await alice.keyboard.type("during reload ");
-  await bob.locator(`[data-path="${PATH}"]`).click();
+  await openFile(bob, PATH);
   await alice.keyboard.type("after reload ");
   await expect(status(alice)).toContainText("saved");
   await expect.poll(() => editorText(bob)).toBe(await editorText(alice));
