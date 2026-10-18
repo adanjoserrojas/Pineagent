@@ -12,7 +12,8 @@ function fakeRobot() {
   const w = window as unknown as { __robot: string[]; __unplug(): void; __replug(): void };
   w.__robot = [];
   let toHost: ReadableStreamDefaultController<Uint8Array> | null = null;
-  let buf = "";
+  let buf = new Uint8Array(0);
+  let audioLeft = 0; // bytes of SAY audio still to come; they aren't lines
   let streams: { readable: ReadableStream<Uint8Array>; writable: WritableStream<Uint8Array> } | null = null;
   const port = {
     async open() {
@@ -20,19 +21,38 @@ function fakeRobot() {
         readable: new ReadableStream<Uint8Array>({ start: (c) => void (toHost = c) }),
         writable: new WritableStream<Uint8Array>({
           write(chunk) {
-            buf += dec.decode(chunk);
-            let i;
-            while ((i = buf.indexOf("\n")) >= 0) {
-              const line = buf.slice(0, i);
-              buf = buf.slice(i + 1);
+            const joined = new Uint8Array(buf.length + chunk.length);
+            joined.set(buf);
+            joined.set(chunk, buf.length);
+            buf = joined;
+            const reply = (out: string) => setTimeout(() => toHost?.enqueue(enc.encode(`${out}\r\n`)), 5);
+            for (;;) {
+              if (audioLeft) {
+                const take = Math.min(audioLeft, buf.length);
+                if (!take) break;
+                audioLeft -= take;
+                buf = buf.subarray(take);
+                if (!audioLeft) reply("OK SAY played");
+                continue;
+              }
+              const i = buf.indexOf(10);
+              if (i < 0) break;
+              const line = dec.decode(buf.subarray(0, i));
+              buf = buf.subarray(i + 1);
               w.__robot.push(line);
-              const out =
+              const say = /^SAY (\d+)$/.exec(line);
+              if (say && Number(say[1]) > 0) {
+                audioLeft = Number(say[1]);
+                continue;
+              }
+              reply(
                 line === "PING" ? "OK PONG plantbot-test v1"
                 : line.startsWith("STATE ") ? `OK ANIM ${line.slice(6)}`
                 : line === "SENSE" ? "OK SENSE mv=3100 power=yes"
+                : line === "SAY 0" ? "OK SAY ready rate=24000"
                 : /^(MELODY|SERVO|PIEZO|TONE) /.test(line) ? `OK ${line} done`
-                : "ERR Unknown";
-              setTimeout(() => toHost?.enqueue(enc.encode(`${out}\r\n`)), 5);
+                : "ERR Unknown",
+              );
             }
           },
         }),
@@ -69,19 +89,22 @@ test("the robot mirrors the plant's faces, and comes back after an unplug", asyn
     await page.getByLabel("Ask your agent").fill("add a test for currentUser");
     await page.getByRole("button", { name: "Start run" }).click();
     await expect(page.getByTestId("run-state")).toHaveText("done");
-    // Finishing celebrates: the melody, then the arms wave.
-    await expect.poll(() => robot(page)).toContain("SERVO WAVE");
+    // Finishing celebrates: "Yay! All done!" (the real Polly clip, served by the app), then the arms wave.
+    await expect.poll(() => robot(page), { timeout: 15_000 }).toContain("SERVO WAVE");
     const sent = await robot(page);
-    const order = ["STATE planning", "STATE executing", "STATE done", "MELODY 30", "SERVO WAVE"].map((l) => sent.indexOf(l));
+    const done = sent.indexOf("STATE done");
+    const order = ["STATE planning", "STATE executing", "STATE done", "SERVO WAVE"].map((l) => sent.indexOf(l));
     expect(order.every((i) => i > 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+    const doneLine = sent.slice(done).find((l) => /^SAY [1-9]/.test(l));
+    expect(Number(doneLine?.slice(4))).toBeGreaterThan(48_000 * 1.2); // ~1.6 s at 24 kHz, 2 bytes a sample
     await page.screenshot({ path: "test-results/plant-serial.png" });
 
     // With Sound off, Celebrate only waves.
     await panel(page).getByLabel("Sound").uncheck();
     const before = (await robot(page)).length;
     await panel(page).getByRole("button", { name: "Celebrate" }).click();
-    await expect.poll(async () => (await robot(page)).slice(before)).toEqual(["SENSE", "SERVO WAVE"]);
+    await expect.poll(async () => (await robot(page)).slice(before), { timeout: 10_000 }).toEqual(["SENSE", "SERVO WAVE"]);
     await panel(page).getByLabel("Sound").check();
 
     await page.evaluate(() => (window as unknown as { __unplug(): void }).__unplug());

@@ -39,6 +39,17 @@ type Link = {
   reader: ReadableStreamDefaultReader<Uint8Array>;
   writer: WritableStreamDefaultWriter<Uint8Array>;
 };
+// Where the voice comes from and the laptop speaker, replaceable in tests.
+export type PlantSerialOptions = {
+  timeoutMs: number;
+  settleMs: number;
+  loadClip: (face: FaceKey) => Promise<Int16Array | null>; // 16 kHz mono, from scripts/plant-voice.mjs
+  playLocal: (pcm: Int16Array) => Promise<void>; // when the robot can't speak: old firmware or no 5 V
+};
+const CLIP_RATE = 16000;
+const VOICE_GAIN = 0.5; // the amp is loud next to a keyboard; tones play at 25–30 %
+const USB_BYTES_PER_MS = 50; // a conservative 50 KB/s for the SAY timeout
+
 type Pending = { resolve: (rest: string) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
 
 export class PlantSerial {
@@ -55,12 +66,15 @@ export class PlantSerial {
   private power: boolean | null = null;
   private prefs: PlantPrefs = loadPrefs();
   private testing = false;
+  private sayRate: number | null | undefined; // the firmware's SAY rate; null if it can't, undefined until asked
+  private readonly opts: PlantSerialOptions;
 
   constructor(
     private readonly serial: SerialLike | undefined,
     private readonly bridge: BridgeLike,
-    private readonly opts = { timeoutMs: 1500, settleMs: 600 },
+    opts: Partial<PlantSerialOptions> = {},
   ) {
+    this.opts = { timeoutMs: 1500, settleMs: 600, loadClip: fetchClip, playLocal, ...opts };
     this.status = serial ? { state: "off" } : { state: "unsupported" };
     serial?.addEventListener("connect", (e) => void this.replugged(e));
   }
@@ -139,6 +153,7 @@ export class PlantSerial {
     this.port = port;
     this.sent = null;
     this.power = null;
+    this.sayRate = undefined; // it may have been reflashed
     this.on(null);
     // Attaching hands over the current face at once, which is also the re-send after a replug.
     this.detach = this.bridge.attach({ show: (face) => this.show(face) });
@@ -189,18 +204,60 @@ export class PlantSerial {
   private async cue(face: FaceKey, during: FaceKey | null) {
     const steps = (CUES[face] ?? []).filter((s) => this.prefs[s.kind]);
     if (!steps.length) return;
-    if (steps.some((s) => s.power)) await this.sense();
+    let sensed = false;
     for (const step of steps) {
+      if (step.waitMs) await new Promise((r) => setTimeout(r, step.waitMs));
       if (!this.link || this.wanted !== during) return;
+      if (step.power && !sensed) {
+        await this.sense();
+        sensed = true;
+      }
+      if (step.say) {
+        await this.say(face);
+        continue;
+      }
       const cmd = step.power && this.power === false ? step.piezo : step.cmd;
       if (!cmd) continue;
       try {
-        await this.command(cmd, step.ms + this.opts.timeoutMs);
+        await this.command(cmd, (step.ms ?? 0) + this.opts.timeoutMs);
       } catch (e) {
         if (!this.link) return;
         this.on(this.sent, `The robot couldn’t do “${cmd}”: ${(e as Error).message}`);
       }
     }
+  }
+
+  // Speaks the face's line on the robot, or on the laptop when the robot can't: firmware without SAY,
+  // or no 5 V supply for the amp.
+  private async say(face: FaceKey) {
+    const clip = await this.opts.loadClip(face).catch(() => null);
+    if (!clip || !this.link) return;
+    const rate = this.power === false ? null : await this.speechRate();
+    if (rate) {
+      const bytes = forFirmware(clip, rate);
+      const ms = (clip.length * 1000) / CLIP_RATE + bytes.length / USB_BYTES_PER_MS;
+      try {
+        await this.command(`SAY ${bytes.length}`, ms + this.opts.timeoutMs, bytes);
+        return;
+      } catch (e) {
+        if (!this.link) return;
+        this.on(this.sent, `The robot couldn’t speak: ${(e as Error).message}`);
+      }
+    }
+    await this.opts.playLocal(clip).catch(() => {});
+  }
+
+  // `SAY 0` sends no audio, so firmware without SAY just answers ERR and stays in step.
+  private async speechRate() {
+    if (this.sayRate === undefined) {
+      try {
+        const m = /^SAY ready rate=(\d+)/.exec(await this.command("SAY 0"));
+        this.sayRate = m ? Number(m[1]) : null;
+      } catch {
+        this.sayRate = this.link ? null : undefined;
+      }
+    }
+    return this.sayRate;
   }
 
   // Asks the firmware whether the 5 V supply is in. It can be plugged in or out at any time.
@@ -218,13 +275,13 @@ export class PlantSerial {
   }
 
   // One command in flight at a time, so each answer belongs to the command before it.
-  private command(line: string, timeoutMs = this.opts.timeoutMs): Promise<string> {
-    const run = this.chain.then(() => this.exchange(line, timeoutMs));
+  private command(line: string, timeoutMs = this.opts.timeoutMs, payload?: Uint8Array): Promise<string> {
+    const run = this.chain.then(() => this.exchange(line, timeoutMs, payload));
     this.chain = run.catch(() => {});
     return run;
   }
 
-  private exchange(line: string, timeoutMs: number): Promise<string> {
+  private exchange(line: string, timeoutMs: number, payload?: Uint8Array): Promise<string> {
     const link = this.link;
     if (!link) return Promise.reject(new Error("not connected"));
     return new Promise<string>((resolve, reject) => {
@@ -234,6 +291,7 @@ export class PlantSerial {
       }, timeoutMs);
       this.pending = { resolve, reject, timer };
       link.writer.write(new TextEncoder().encode(`${line}\n`)).catch(() => {});
+      if (payload) link.writer.write(payload).catch(() => {});
     });
   }
 
@@ -305,6 +363,48 @@ export class PlantSerial {
     this.status = status;
     this.listeners.forEach((fn) => fn());
   }
+}
+
+// 16 kHz clip → the firmware's rate (linear interpolation), with the voice gain, as little-endian bytes.
+export function forFirmware(clip: Int16Array, rate: number): Uint8Array {
+  const n = Math.floor((clip.length * rate) / CLIP_RATE);
+  const out = new DataView(new ArrayBuffer(n * 2));
+  for (let j = 0; j < n; j++) {
+    const x = (j * CLIP_RATE) / rate, i = Math.floor(x), f = x - i;
+    const s = (clip[i] * (1 - f) + (clip[Math.min(i + 1, clip.length - 1)] * f)) * VOICE_GAIN;
+    out.setInt16(j * 2, Math.max(-32768, Math.min(32767, Math.round(s))), true);
+  }
+  return new Uint8Array(out.buffer);
+}
+
+const clips = new Map<FaceKey, Promise<Int16Array | null>>();
+function fetchClip(face: FaceKey) {
+  if (!clips.has(face)) {
+    const url = `${import.meta.env.BASE_URL}voice/${face}.pcm`;
+    clips.set(face, fetch(url).then(async (r) => (r.ok ? new Int16Array(await r.arrayBuffer()) : null)).catch(() => null));
+  }
+  return clips.get(face)!;
+}
+
+let audio: AudioContext | null = null;
+async function playLocal(clip: Int16Array) {
+  if (typeof AudioContext === "undefined") return;
+  audio ??= new AudioContext();
+  // Chrome keeps audio suspended until the page has had a click; never wait on a clip that can't play.
+  // resume() can stay pending until a click, so give it a moment rather than waiting on it.
+  if (audio.state === "suspended") await Promise.race([audio.resume().catch(() => {}), new Promise((r) => setTimeout(r, 200))]);
+  if (audio.state !== "running") return;
+  const buffer = audio.createBuffer(1, clip.length, CLIP_RATE);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < clip.length; i++) data[i] = (clip[i] / 32768) * VOICE_GAIN;
+  const source = audio.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audio.destination);
+  await new Promise<void>((resolve) => {
+    source.onended = () => resolve();
+    setTimeout(resolve, buffer.duration * 1000 + 500); // in case "ended" never comes
+    source.start();
+  });
 }
 
 function loadPrefs(): PlantPrefs {

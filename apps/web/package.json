@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "sync-faces": "node scripts/sync-faces.mjs"
+    "sync-faces": "node scripts/sync-faces.mjs",
+    "plant-voice": "node scripts/plant-voice.mjs"
   },
   "dependencies": {
     "@pineagent/core": "*",

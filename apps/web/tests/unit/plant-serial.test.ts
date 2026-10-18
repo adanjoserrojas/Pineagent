@@ -1,35 +1,69 @@
 import { describe, expect, it } from "vitest";
 import { PlantBridge } from "../../src/plant/bridge";
-import { PlantSerial, type SerialLike, type SerialPortLike } from "../../src/plant/serial";
+import { forFirmware, PlantSerial, type SerialLike, type SerialPortLike } from "../../src/plant/serial";
 
-const OPTS = { timeoutMs: 50, settleMs: 0 };
+const CLIP = new Int16Array(160).fill(1000); // 10 ms at 16 kHz → 240 samples, 480 bytes at 24 kHz
+let laptop: number[] = []; // clips played on the laptop speaker
+const OPTS = {
+  timeoutMs: 50,
+  settleMs: 0,
+  loadClip: async () => CLIP,
+  playLocal: async (clip: Int16Array) => void laptop.push(clip.length),
+};
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 // A robot on a USB cable: answers each line the way PlantBotTest.ino does, unless `reply` says otherwise.
-// A reply can be delayed, the way the firmware only answers SERVO WAVE once the arms are back.
+// A reply can be delayed, the way the firmware only answers SERVO WAVE once the arms are back. After an
+// accepted `SAY n` line, the next n bytes are audio, and the answer comes once they've all arrived.
 type Reply = string | null | [string, number];
 function robot(reply: (line: string) => Reply = firmware) {
   const got: string[] = [];
+  const said: number[] = []; // audio bytes received per SAY
   let toHost!: ReadableStreamDefaultController<Uint8Array>;
-  let buf = "";
+  let buf = new Uint8Array(0);
+  let audioLeft = 0;
+  let afterAudio: Reply = null;
   let opened = false;
+  const answer = (out: Reply) => {
+    if (out === null) return;
+    const [text, delay] = Array.isArray(out) ? out : [out, 0];
+    const send = () => toHost.enqueue(enc.encode(`${text}\r\n`));
+    if (delay) setTimeout(send, delay);
+    else queueMicrotask(send);
+  };
   const make = () => ({
     readable: new ReadableStream<Uint8Array>({ start: (c) => void (toHost = c) }),
     writable: new WritableStream<Uint8Array>({
       write(chunk) {
-        buf += dec.decode(chunk);
-        let i;
-        while ((i = buf.indexOf("\n")) >= 0) {
-          const line = buf.slice(0, i);
-          buf = buf.slice(i + 1);
+        const joined = new Uint8Array(buf.length + chunk.length);
+        joined.set(buf);
+        joined.set(chunk, buf.length);
+        buf = joined;
+        for (;;) {
+          if (audioLeft) {
+            const take = Math.min(audioLeft, buf.length);
+            if (!take) break;
+            said[said.length - 1] += take;
+            audioLeft -= take;
+            buf = buf.subarray(take);
+            if (!audioLeft) answer(afterAudio);
+            continue;
+          }
+          const i = buf.indexOf(10);
+          if (i < 0) break;
+          const line = dec.decode(buf.subarray(0, i));
+          buf = buf.subarray(i + 1);
           got.push(line);
           const out = reply(line);
-          if (out === null) continue;
-          const [text, delay] = Array.isArray(out) ? out : [out, 0];
-          const send = () => toHost.enqueue(enc.encode(`${text}\r\n`));
-          if (delay) setTimeout(send, delay);
-          else queueMicrotask(send);
+          const n = Number(/^SAY (\d+)$/.exec(line)?.[1] ?? 0);
+          const text = Array.isArray(out) ? out[0] : out;
+          // Firmware that knows SAY reads the audio even when it then refuses to play it.
+          if (n > 0 && text && !text.includes("Unknown command")) {
+            audioLeft = n;
+            afterAudio = out;
+            said.push(0);
+          } else answer(out);
         }
       },
     }),
@@ -51,6 +85,7 @@ function robot(reply: (line: string) => Reply = firmware) {
   return {
     port,
     got,
+    said,
     faces: () => got.filter((l) => l.startsWith("STATE ")).map((l) => l.slice(6)),
     isOpen: () => opened,
     unplug: () => toHost.error(Object.assign(new Error("The device has been lost."), { name: "NetworkError" })),
@@ -65,9 +100,12 @@ function firmware(line: string, power = true): Reply {
   if (line === "SERVO WAVE") return ["OK SERVO wave done", 120]; // longer than the 50 ms base timeout
   if (line.startsWith("MELODY ")) return ["OK MELODY done", 40];
   if (/^(MELODY|TONE|PIEZO) /.test(line)) return `OK ${line.split(" ")[0]} done`;
+  if (line === "SAY 0") return "OK SAY ready rate=24000";
+  if (line.startsWith("SAY ")) return ["OK SAY played", 40];
   return "ERR Unknown command";
 }
 const unpowered = (line: string) => firmware(line, false);
+const noSay = (line: string) => (line.startsWith("SAY ") ? `ERR Unknown command: ${line}. Send HELP for the list.` : firmware(line));
 
 function browser(port: SerialPortLike, granted: SerialPortLike[] = []) {
   const serial = Object.assign(new EventTarget(), {
@@ -194,6 +232,7 @@ describe("plant over Web Serial", () => {
 describe("robot cues", () => {
   // Connects, lets the first face go out (it never gets a cue), and returns what's sent from then on.
   async function connected(reply?: (line: string) => Reply) {
+    laptop = [];
     const bot = robot(reply);
     const bridge = new PlantBridge();
     const plant = new PlantSerial(browser(bot.port).serial, bridge, OPTS);
@@ -203,13 +242,16 @@ describe("robot cues", () => {
     const from = bot.got.length;
     return { bot, bridge, plant, after: () => bot.got.slice(from) };
   }
+  const settle = (ms = 150) => new Promise((r) => setTimeout(r, ms));
 
-  it("a finished run plays the melody and waves the arms, after the face", async () => {
-    const { bridge, after } = await connected();
+  it("a finished run says its line on the robot, then waves the arms", async () => {
+    const { bot, bridge, after } = await connected();
     bridge.update("done");
     await until(() => after().includes("SERVO WAVE"));
-    await new Promise((r) => setTimeout(r, 150)); // the wave answers late; it must not time out
-    expect(after()).toEqual(["STATE done", "SENSE", "MELODY 30", "SERVO WAVE"]);
+    await settle(); // the wave answers late; it must not time out
+    expect(after()).toEqual(["STATE done", "SENSE", "SAY 0", "SAY 480", "SERVO WAVE"]);
+    expect(bot.said).toEqual([480]);
+    expect(laptop).toEqual([]);
   });
 
   it("connecting while the plant already shows done doesn't celebrate", async () => {
@@ -219,24 +261,58 @@ describe("robot cues", () => {
     const plant = new PlantSerial(browser(bot.port).serial, bridge, OPTS);
     await plant.connect();
     await until(() => face(plant) === "done");
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(20);
     expect(bot.got).toEqual(["PING", "STATE done"]);
   });
 
-  it("without the 5 V supply the piezo plays instead and the arms stay still", async () => {
+  it("without the 5 V supply the laptop speaks, the piezo stands in for tones, and the arms stay still", async () => {
     const { bridge, plant, after } = await connected(unpowered);
     bridge.update("done");
-    await until(() => after().includes("PIEZO CHIRP"));
-    await new Promise((r) => setTimeout(r, 20));
-    expect(after()).toEqual(["STATE done", "SENSE", "PIEZO CHIRP"]);
+    await until(() => laptop.length === 1);
+    await settle(20);
+    expect(after()).toEqual(["STATE done", "SENSE"]);
     expect(plant.getStatus()).toMatchObject({ state: "on", power: false, problem: undefined });
+
+    bridge.update("error");
+    await until(() => laptop.length === 2);
+    expect(after().slice(2)).toEqual(["STATE error", "SENSE", "PIEZO 700 180", "PIEZO 500 420"]);
   });
 
-  it("asking for approval chirps the piezo, which works on USB power alone", async () => {
+  it("firmware without SAY is asked once, then the laptop speaks", async () => {
+    const { bridge, after } = await connected(noSay);
+    bridge.update("done");
+    await until(() => after().includes("SERVO WAVE"));
+    await settle();
+    bridge.update("idle");
+    await until(() => after().includes("STATE idle"));
+    bridge.update("done");
+    await until(() => after().filter((l) => l === "SERVO WAVE").length === 2);
+    expect(after()).toEqual(["STATE done", "SENSE", "SAY 0", "SERVO WAVE", "STATE idle", "STATE done", "SENSE", "SERVO WAVE"]);
+    expect(laptop).toEqual([160, 160]);
+  });
+
+  it("if the robot refuses a clip, the laptop says it and the panel says why", async () => {
+    const { bot, bridge, plant } = await connected((l) => (/^SAY [1-9]/.test(l) ? "ERR The amp needs the 5 V brick plugged in." : firmware(l)));
+    bridge.update("paused");
+    await until(() => laptop.length === 1);
+    expect(plant.getStatus()).toMatchObject({ problem: expect.stringContaining("couldn’t speak") });
+    expect(bot.said).toEqual([480]); // it still read the audio, so the next line parses
+  });
+
+  it("asking for approval chirps the piezo, then asks out loud", async () => {
     const { bridge, after } = await connected();
     bridge.update("awaiting_approval");
-    await until(() => after().includes("PIEZO CHIRP"));
-    expect(after()).toEqual(["STATE awaiting_approval", "PIEZO CHIRP"]);
+    await until(() => after().includes("SAY 480"));
+    expect(after()).toEqual(["STATE awaiting_approval", "PIEZO CHIRP", "SENSE", "SAY 0", "SAY 480"]);
+  });
+
+  it("a face that flashes by gets no line", async () => {
+    const { bridge, after } = await connected();
+    bridge.update("planning");
+    await settle(100);
+    bridge.update("executing"); // within planning's 300 ms
+    await until(() => after().includes("SAY 480"));
+    expect(after()).toEqual(["STATE planning", "STATE executing", "SENSE", "SAY 0", "SAY 480"]);
   });
 
   it("sound and arms can each be turned off", async () => {
@@ -244,30 +320,38 @@ describe("robot cues", () => {
     plant.setPrefs({ sound: false });
     bridge.update("done");
     await until(() => after().includes("SERVO WAVE"));
-    await new Promise((r) => setTimeout(r, 150)); // the wave finishes
+    await settle(); // the wave finishes
     plant.setPrefs({ sound: true, arms: false });
     bridge.update("idle");
     await until(() => face(plant) === "idle");
     bridge.update("done");
-    await until(() => after().filter((l) => l === "MELODY 30").length === 1);
-    await new Promise((r) => setTimeout(r, 150));
-    expect(after()).toEqual(["STATE done", "SENSE", "SERVO WAVE", "STATE idle", "STATE done", "SENSE", "MELODY 30"]);
+    await until(() => after().includes("SAY 480"));
+    await settle();
+    expect(after()).toEqual(["STATE done", "SENSE", "SERVO WAVE", "STATE idle", "STATE done", "SENSE", "SAY 0", "SAY 480"]);
   });
 
   it("a new face cuts the rest of a celebration short", async () => {
     const { bridge, after } = await connected();
     bridge.update("done");
-    await until(() => after().includes("MELODY 30"));
-    bridge.update("planning"); // a new run starts while the melody plays
-    await until(() => after().includes("STATE planning"));
-    await new Promise((r) => setTimeout(r, 150));
-    expect(after()).toEqual(["STATE done", "SENSE", "MELODY 30", "STATE planning"]);
+    await until(() => after().includes("SAY 480"));
+    bridge.update("blocked"); // something new happens while it speaks
+    await until(() => after().includes("STATE blocked"));
+    await settle();
+    expect(after().slice(0, 5)).toEqual(["STATE done", "SENSE", "SAY 0", "SAY 480", "STATE blocked"]);
+    expect(after()).not.toContain("SERVO WAVE");
   });
 
   it("Celebrate plays the done cue without changing the face", async () => {
     const { plant, after } = await connected();
     await plant.test("done");
-    expect(after()).toEqual(["SENSE", "MELODY 30", "SERVO WAVE"]);
+    expect(after()).toEqual(["SENSE", "SAY 0", "SAY 480", "SERVO WAVE"]);
     expect(face(plant)).toBe("idle");
+  });
+
+  it("clips are upsampled to the firmware's rate at half volume, little-endian", () => {
+    const bytes = forFirmware(new Int16Array([0, 3000, -3000, 1000]), 24000);
+    const out = new DataView(bytes.buffer);
+    expect(bytes.length).toBe(12); // 4 samples at 16 kHz → 6 at 24 kHz
+    expect([0, 1, 2, 3, 4, 5].map((i) => out.getInt16(i * 2, true))).toEqual([0, 1000, 500, -1500, -167, 500]);
   });
 });
