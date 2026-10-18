@@ -13,7 +13,7 @@ function fakeRobot() {
   w.__robot = [];
   let toHost: ReadableStreamDefaultController<Uint8Array> | null = null;
   let buf = new Uint8Array(0);
-  let audioLeft = 0; // bytes of SAY audio still to come; they aren't lines
+  let audioLeft = 0; // bytes of a SAYD chunk still to come; they aren't lines
   let streams: { readable: ReadableStream<Uint8Array>; writable: WritableStream<Uint8Array> } | null = null;
   const port = {
     async open() {
@@ -32,7 +32,7 @@ function fakeRobot() {
                 if (!take) break;
                 audioLeft -= take;
                 buf = buf.subarray(take);
-                if (!audioLeft) reply("OK SAY played");
+                if (!audioLeft) reply("OK SAYD");
                 continue;
               }
               const i = buf.indexOf(10);
@@ -40,16 +40,19 @@ function fakeRobot() {
               const line = dec.decode(buf.subarray(0, i));
               buf = buf.subarray(i + 1);
               w.__robot.push(line);
-              const say = /^SAY (\d+)$/.exec(line);
-              if (say && Number(say[1]) > 0) {
-                audioLeft = Number(say[1]);
+              const chunk = /^SAYD (\d+)$/.exec(line);
+              if (chunk) {
+                if (Number(chunk[1]) > 512) throw new Error("chunk bigger than the robot asked for");
+                audioLeft = Number(chunk[1]);
                 continue;
               }
               reply(
                 line === "PING" ? "OK PONG plantbot-test v1"
                 : line.startsWith("STATE ") ? `OK ANIM ${line.slice(6)}`
                 : line === "SENSE" ? "OK SENSE mv=3100 power=yes"
-                : line === "SAY 0" ? "OK SAY ready rate=24000"
+                : line === "SAY 0" ? "OK SAY ready rate=24000 chunk=512"
+                : line === "SAY PLAY" ? "OK SAY played"
+                : /^SAY \d+$/.test(line) ? "OK SAY open"
                 : /^(MELODY|SERVO|PIEZO|TONE) /.test(line) ? `OK ${line} done`
                 : "ERR Unknown",
               );

@@ -48,7 +48,6 @@ export type PlantSerialOptions = {
 };
 const CLIP_RATE = 16000;
 const VOICE_GAIN = 0.5; // the amp is loud next to a keyboard; tones play at 25–30 %
-const USB_BYTES_PER_MS = 50; // a conservative 50 KB/s for the SAY timeout
 
 type Pending = { resolve: (rest: string) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
 
@@ -66,7 +65,7 @@ export class PlantSerial {
   private power: boolean | null = null;
   private prefs: PlantPrefs = loadPrefs();
   private testing = false;
-  private sayRate: number | null | undefined; // the firmware's SAY rate; null if it can't, undefined until asked
+  private speech: { rate: number; chunk: number } | null | undefined; // from `SAY 0`; null if it can't, undefined until asked
   private readonly opts: PlantSerialOptions;
 
   constructor(
@@ -153,7 +152,7 @@ export class PlantSerial {
     this.port = port;
     this.sent = null;
     this.power = null;
-    this.sayRate = undefined; // it may have been reflashed
+    this.speech = undefined; // it may have been reflashed
     this.on(null);
     // Attaching hands over the current face at once, which is also the re-send after a replug.
     this.detach = this.bridge.attach({ show: (face) => this.show(face) });
@@ -232,12 +231,17 @@ export class PlantSerial {
   private async say(face: FaceKey) {
     const clip = await this.opts.loadClip(face).catch(() => null);
     if (!clip || !this.link) return;
-    const rate = this.power === false ? null : await this.speechRate();
-    if (rate) {
-      const bytes = forFirmware(clip, rate);
-      const ms = (clip.length * 1000) / CLIP_RATE + bytes.length / USB_BYTES_PER_MS;
+    const speech = this.power === false ? null : await this.speechSupport();
+    if (speech) {
+      const bytes = forFirmware(clip, speech.rate);
+      // The robot's USB receive buffer drops what doesn't fit, so the audio goes in chunks it confirms.
       try {
-        await this.command(`SAY ${bytes.length}`, ms + this.opts.timeoutMs, bytes);
+        await this.command(`SAY ${bytes.length}`);
+        for (let at = 0; at < bytes.length; at += speech.chunk) {
+          const part = bytes.subarray(at, at + speech.chunk);
+          await this.command(`SAYD ${part.length}`, this.opts.timeoutMs, part);
+        }
+        await this.command("SAY PLAY", (clip.length * 1000) / CLIP_RATE + this.opts.timeoutMs);
         return;
       } catch (e) {
         if (!this.link) return;
@@ -247,17 +251,18 @@ export class PlantSerial {
     await this.opts.playLocal(clip).catch(() => {});
   }
 
-  // `SAY 0` sends no audio, so firmware without SAY just answers ERR and stays in step.
-  private async speechRate() {
-    if (this.sayRate === undefined) {
+  // `SAY 0` sends no audio, so firmware without SAY just answers ERR and stays in step. Firmware that
+  // reports no chunk size is the first, unchunked SAY, which loses audio: the laptop speaks instead.
+  private async speechSupport() {
+    if (this.speech === undefined) {
       try {
-        const m = /^SAY ready rate=(\d+)/.exec(await this.command("SAY 0"));
-        this.sayRate = m ? Number(m[1]) : null;
+        const m = /^SAY ready rate=(\d+) chunk=(\d+)/.exec(await this.command("SAY 0"));
+        this.speech = m ? { rate: Number(m[1]), chunk: Number(m[2]) } : null;
       } catch {
-        this.sayRate = this.link ? null : undefined;
+        this.speech = this.link ? null : undefined;
       }
     }
-    return this.sayRate;
+    return this.speech;
   }
 
   // Asks the firmware whether the 5 V supply is in. It can be plugged in or out at any time.

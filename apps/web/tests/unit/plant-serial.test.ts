@@ -14,12 +14,13 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 // A robot on a USB cable: answers each line the way PlantBotTest.ino does, unless `reply` says otherwise.
-// A reply can be delayed, the way the firmware only answers SERVO WAVE once the arms are back. After an
-// accepted `SAY n` line, the next n bytes are audio, and the answer comes once they've all arrived.
+// A reply can be delayed, the way the firmware only answers SERVO WAVE once the arms are back. After a
+// `SAYD k` line the next k bytes are audio, and the answer comes once they've all arrived.
 type Reply = string | null | [string, number];
 function robot(reply: (line: string) => Reply = firmware) {
   const got: string[] = [];
-  const said: number[] = []; // audio bytes received per SAY
+  const said: number[] = []; // audio bytes received per SAY n
+  const chunks: number[] = []; // size of each SAYD
   let toHost!: ReadableStreamDefaultController<Uint8Array>;
   let buf = new Uint8Array(0);
   let audioLeft = 0;
@@ -45,6 +46,7 @@ function robot(reply: (line: string) => Reply = firmware) {
             const take = Math.min(audioLeft, buf.length);
             if (!take) break;
             said[said.length - 1] += take;
+            chunks[chunks.length - 1] += take;
             audioLeft -= take;
             buf = buf.subarray(take);
             if (!audioLeft) answer(afterAudio);
@@ -56,13 +58,13 @@ function robot(reply: (line: string) => Reply = firmware) {
           buf = buf.subarray(i + 1);
           got.push(line);
           const out = reply(line);
-          const n = Number(/^SAY (\d+)$/.exec(line)?.[1] ?? 0);
-          const text = Array.isArray(out) ? out[0] : out;
-          // Firmware that knows SAY reads the audio even when it then refuses to play it.
-          if (n > 0 && text && !text.includes("Unknown command")) {
-            audioLeft = n;
+          if (/^SAY [1-9]/.test(line)) said.push(0);
+          const k = Number(/^SAYD (\d+)$/.exec(line)?.[1] ?? 0);
+          // Firmware that knows SAYD reads the bytes even when it then refuses them.
+          if (k > 0 && !String(Array.isArray(out) ? out[0] : out).includes("Unknown command")) {
+            audioLeft = k;
             afterAudio = out;
-            said.push(0);
+            chunks.push(0);
           } else answer(out);
         }
       },
@@ -86,6 +88,7 @@ function robot(reply: (line: string) => Reply = firmware) {
     port,
     got,
     said,
+    chunks,
     faces: () => got.filter((l) => l.startsWith("STATE ")).map((l) => l.slice(6)),
     isOpen: () => opened,
     unplug: () => toHost.error(Object.assign(new Error("The device has been lost."), { name: "NetworkError" })),
@@ -100,12 +103,14 @@ function firmware(line: string, power = true): Reply {
   if (line === "SERVO WAVE") return ["OK SERVO wave done", 120]; // longer than the 50 ms base timeout
   if (line.startsWith("MELODY ")) return ["OK MELODY done", 40];
   if (/^(MELODY|TONE|PIEZO) /.test(line)) return `OK ${line.split(" ")[0]} done`;
-  if (line === "SAY 0") return "OK SAY ready rate=24000";
-  if (line.startsWith("SAY ")) return ["OK SAY played", 40];
+  if (line === "SAY 0") return "OK SAY ready rate=24000 chunk=512";
+  if (line === "SAY PLAY") return ["OK SAY played", 40];
+  if (/^SAY \d+$/.test(line)) return power ? `OK SAY open ${line.slice(4)}` : "ERR The amp needs the 5 V brick plugged in (SENSE reads low).";
+  if (line.startsWith("SAYD ")) return "OK SAYD";
   return "ERR Unknown command";
 }
 const unpowered = (line: string) => firmware(line, false);
-const noSay = (line: string) => (line.startsWith("SAY ") ? `ERR Unknown command: ${line}. Send HELP for the list.` : firmware(line));
+const noSay = (line: string) => (/^SAYD? /.test(line) ? `ERR Unknown command: ${line}. Send HELP for the list.` : firmware(line));
 
 function browser(port: SerialPortLike, granted: SerialPortLike[] = []) {
   const serial = Object.assign(new EventTarget(), {
@@ -249,7 +254,7 @@ describe("robot cues", () => {
     bridge.update("done");
     await until(() => after().includes("SERVO WAVE"));
     await settle(); // the wave answers late; it must not time out
-    expect(after()).toEqual(["STATE done", "SENSE", "SAY 0", "SAY 480", "SERVO WAVE"]);
+    expect(after()).toEqual(["STATE done", "SENSE", "SAY 0", "SAY 480", "SAYD 480", "SAY PLAY", "SERVO WAVE"]);
     expect(bot.said).toEqual([480]);
     expect(laptop).toEqual([]);
   });
@@ -291,19 +296,42 @@ describe("robot cues", () => {
     expect(laptop).toEqual([160, 160]);
   });
 
-  it("if the robot refuses a clip, the laptop says it and the panel says why", async () => {
+  it("if the robot refuses a clip, no audio is sent, the laptop says it and the panel says why", async () => {
+    // SENSE says yes, but the amp still refuses (say the brick was unplugged in between).
     const { bot, bridge, plant } = await connected((l) => (/^SAY [1-9]/.test(l) ? "ERR The amp needs the 5 V brick plugged in." : firmware(l)));
     bridge.update("paused");
     await until(() => laptop.length === 1);
     expect(plant.getStatus()).toMatchObject({ problem: expect.stringContaining("couldn’t speak") });
-    expect(bot.said).toEqual([480]); // it still read the audio, so the next line parses
+    expect(bot.chunks).toEqual([]);
+  });
+
+  it("long clips go in chunks no bigger than the robot asks for, all of the audio arriving", async () => {
+    const long = new Int16Array(1000).fill(1000); // → 1500 samples, 3000 bytes
+    const bot = robot();
+    const bridge = new PlantBridge();
+    const plant = new PlantSerial(browser(bot.port).serial, bridge, { ...OPTS, loadClip: async () => long });
+    plant.setPrefs({ sound: true, arms: false });
+    await plant.connect();
+    await until(() => face(plant) === "idle");
+    bridge.update("done");
+    await until(() => bot.got.includes("SAY PLAY"));
+    expect(bot.chunks).toEqual([512, 512, 512, 512, 512, 440]);
+    expect(bot.said).toEqual([3000]);
+    expect(bot.got).toContain("SAY 3000");
+  });
+
+  it("the first, unchunked SAY firmware isn't trusted with audio", async () => {
+    const { bridge, after } = await connected((l) => (l === "SAY 0" ? "OK SAY ready rate=24000" : firmware(l)));
+    bridge.update("paused");
+    await until(() => laptop.length === 1);
+    expect(after()).toEqual(["STATE paused", "SENSE", "SAY 0"]);
   });
 
   it("asking for approval chirps the piezo, then asks out loud", async () => {
     const { bridge, after } = await connected();
     bridge.update("awaiting_approval");
-    await until(() => after().includes("SAY 480"));
-    expect(after()).toEqual(["STATE awaiting_approval", "PIEZO CHIRP", "SENSE", "SAY 0", "SAY 480"]);
+    await until(() => after().includes("SAY PLAY"));
+    expect(after()).toEqual(["STATE awaiting_approval", "PIEZO CHIRP", "SENSE", "SAY 0", "SAY 480", "SAYD 480", "SAY PLAY"]);
   });
 
   it("a face that flashes by gets no line", async () => {
@@ -311,8 +339,8 @@ describe("robot cues", () => {
     bridge.update("planning");
     await settle(100);
     bridge.update("executing"); // within planning's 300 ms
-    await until(() => after().includes("SAY 480"));
-    expect(after()).toEqual(["STATE planning", "STATE executing", "SENSE", "SAY 0", "SAY 480"]);
+    await until(() => after().includes("SAY PLAY"));
+    expect(after()).toEqual(["STATE planning", "STATE executing", "SENSE", "SAY 0", "SAY 480", "SAYD 480", "SAY PLAY"]);
   });
 
   it("sound and arms can each be turned off", async () => {
@@ -325,26 +353,26 @@ describe("robot cues", () => {
     bridge.update("idle");
     await until(() => face(plant) === "idle");
     bridge.update("done");
-    await until(() => after().includes("SAY 480"));
+    await until(() => after().includes("SAY PLAY"));
     await settle();
-    expect(after()).toEqual(["STATE done", "SENSE", "SERVO WAVE", "STATE idle", "STATE done", "SENSE", "SAY 0", "SAY 480"]);
+    expect(after()).toEqual(["STATE done", "SENSE", "SERVO WAVE", "STATE idle", "STATE done", "SENSE", "SAY 0", "SAY 480", "SAYD 480", "SAY PLAY"]);
   });
 
   it("a new face cuts the rest of a celebration short", async () => {
     const { bridge, after } = await connected();
     bridge.update("done");
-    await until(() => after().includes("SAY 480"));
+    await until(() => after().includes("SAY PLAY"));
     bridge.update("blocked"); // something new happens while it speaks
     await until(() => after().includes("STATE blocked"));
     await settle();
-    expect(after().slice(0, 5)).toEqual(["STATE done", "SENSE", "SAY 0", "SAY 480", "STATE blocked"]);
+    expect(after().slice(0, 7)).toEqual(["STATE done", "SENSE", "SAY 0", "SAY 480", "SAYD 480", "SAY PLAY", "STATE blocked"]);
     expect(after()).not.toContain("SERVO WAVE");
   });
 
   it("Celebrate plays the done cue without changing the face", async () => {
     const { plant, after } = await connected();
     await plant.test("done");
-    expect(after()).toEqual(["SENSE", "SAY 0", "SAY 480", "SERVO WAVE"]);
+    expect(after()).toEqual(["SENSE", "SAY 0", "SAY 480", "SAYD 480", "SAY PLAY", "SERVO WAVE"]);
     expect(face(plant)).toBe("idle");
   });
 
