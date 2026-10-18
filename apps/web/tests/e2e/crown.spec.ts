@@ -38,6 +38,7 @@ test("ownership, approval and reduced motion remain clear in Crown", async ({ pa
   await expect(page.locator(".ownership-ribbon")).toContainText("You’re editing");
   await expect(page.getByRole("region", { name: "Branch activity" })).toContainText("src/auth.ts");
   expect(await page.locator(".ownership-ribbon > svg").evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
+  await page.getByRole("radio", { name: "Code", exact: true }).check();
   await page.getByLabel("Ask your agent").fill("unsure add a test for db.ts");
   await page.getByRole("button", { name: "Start run" }).click();
   await expect(page.getByTestId("run-state")).toHaveText("needs a choice");

@@ -9,8 +9,8 @@ export function faceInfo(key: FaceKey): Face {
   return BY_KEY.get(key) ?? BY_KEY.get("idle")!;
 }
 
-// The plant's screen, drawn from the firmware's own face set (synced from states.json), with light
-// CSS motion standing in for the Rive loops in all-states-motion.gif.
+// Use the matching reviewed firmware loop, never the montage of unrelated states.
+// The static SVG remains the reduced-motion fallback; picture follows preference changes live.
 export function VirtualPlant({ face, caption }: { face: FaceKey; caption: string }) {
   const info = faceInfo(face);
   // An <img> data URI renders the SVG without running anything inside it.
@@ -18,7 +18,10 @@ export function VirtualPlant({ face, caption }: { face: FaceKey; caption: string
   return (
     <figure className="plant" data-face={face}>
       <div className="plant-screen" style={{ background: info.background }}>
-        <img className={`plant-face plant-motion-${face}`} src={src} alt={`Plant face: ${info.title}`} width={320} height={170} />
+        <picture>
+          <source media="(prefers-reduced-motion: no-preference)" srcSet={`/faces/${info.key}-loop.gif`} />
+          <img className="plant-face" src={src} alt={`Plant face: ${info.title}`} width={320} height={170} />
+        </picture>
       </div>
       <figcaption className="plant-caption">
         <span className="plant-title">{info.title}</span>

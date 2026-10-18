@@ -2,6 +2,8 @@
 
 Requirement and owner: Software Engineer 1; owner-authorized branch `fix/harness-production`, based on remote main `ccc3005` with Python validation. Implement bounded features from requirements, including new source files, existing integration points and executable acceptance tests, while retaining deterministic DAG execution. This is production hardening, not certification of unrestricted autonomous development.
 
+Main advanced during implementation. The branch also incorporates `189bceb` (PR #15), preserving read-only Ask, failure phases and failed-attempt accounting. Ask remains one read-only answer call with no router, locks, writes or tests. Its capability description now reflects bounded feature building in Code mode; its prompt receives no coding edit contract. Existing-file coding evidence reuses the stronger handle-identity checks added for Ask.
+
 ## Behavior and inference budget
 
 The backend plans a feature, validates its write set, observes existing files and absent creation paths, acquires run locks, routes to one of the same three DAGs, gathers evidence locally, synthesizes the implementation and runs verification. A successful fixture uses one planning call, one router decision and one coding call. A failing implementation can use one coding recovery. Reads, import discovery, hash checks, patch materialization and test execution require no inference calls.
@@ -37,8 +39,8 @@ Provider fixtures emit deterministic plans/patches; the resulting Node and Pytho
 Observed on 2026-10-18 using local image `pineagent-cli-validation:python`, pinned to `sha256:c61b476bfb16d014dd0af57c38d438ad84c79be784295df0252246df7c650605`:
 
 - All workspace typechecks passed in Linux Docker.
-- Full Linux regression: harness 46/46, web 143/143, API 71 passed and 14 optional integration tests skipped; zero failures. Freeze checks 3/3.
-- Separate host-driven feature, rollback and write suite: 11/11 passed, including both real read-only Docker Node and Python feature integrations. API typecheck also passed on Windows.
+- Final Linux regression after integrating main: harness 46/46, web 143/143, API 79 passed and 14 optional integration tests skipped; zero failures. Freeze checks 3/3.
+- Separate host-driven feature, rollback, write, model and lifecycle suite: 25/25 passed, including both real read-only Docker Node and Python feature integrations. All workspace typechecks also passed on Windows.
 - `git diff origin/main --check` passed. The full Windows suite has the platform failures described below.
 
 No live model credentials are used by these tests. Skipped integration tests are not counted as passes; the two new Docker feature cases were run separately as stated above.
@@ -52,12 +54,12 @@ docker run --rm --name pineagent-harness-production-checks --mount "type=bind,so
 # From services/api, run the feature integrations against the existing
 # Pineagent validation image (Node and /opt/python pytest).
 $env:PINEAGENT_FEATURE_IMAGE = $featureImage
-node ../../node_modules/vitest/vitest.mjs run tests/feature-harness.test.ts tests/feature-rollback.test.ts tests/feature-writes.test.ts
+node ../../node_modules/vitest/vitest.mjs run tests/feature-harness.test.ts tests/feature-rollback.test.ts tests/feature-writes.test.ts tests/bedrock.test.ts tests/live-harness.test.ts
 ```
 
 `verify-linux.sh` installs locked dependencies inside a disposable container volume, then runs all workspace typechecks, tests and the harness seal check. It requires no host credentials or Docker socket. Docker-specific integration cases are exercised separately from the host using `PINEAGENT_FEATURE_IMAGE`.
 
-Windows full-suite execution encounters existing platform assumptions: four web symlink-permission failures and two API Unix shell/path failures. Linux is the full-regression reference; these assertions were not weakened.
+The pre-merge Windows full-suite run encountered existing platform assumptions: four web symlink-permission failures and two API Unix shell/path failures. Linux is the final full-regression reference; these assertions were not weakened. The added Ask alias tests were exercised on Linux.
 
 ## Remaining limits and review
 

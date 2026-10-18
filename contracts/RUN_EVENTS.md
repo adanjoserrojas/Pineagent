@@ -28,6 +28,7 @@ type RunStep = { tool: string; detail: string; writes: string[] };
 type RunCandidate = { id: string; score: number; steps: RunStep[] };
 
 type RunView = {
+  mode?: "ask" | "code"; answer?: string; evidencePaths?: string[];
   runId: string; ownerId: string; ownerName: string; task: string;
   state: RunState; routerMode: RouterMode | null; codingRecovery?: CodingRecovery;
   nodeIndex: number; seq: number;
@@ -36,7 +37,7 @@ type RunView = {
   confidence?: number;              // top candidate's score
   writeSet: string[];
   blockedOn?: { path: string; holder: string };
-  error?: { nodeIndex: number; message: string };
+  error?: { nodeIndex: number; message: string; code?: string; phase?: string };
   startedAt: number; endedAt?: number;
 };
 ```
@@ -49,6 +50,8 @@ OpenAI Decisions is the primary Master-1 scorer (`routerMode: "openai"`, matchin
 
 ## Events
 
+Production `run:start` also accepts optional `mode: "ask" | "code"`. Omitted means `code` for existing clients; unknown values are rejected. `ask` is a separate read-only path: one bounded Opus answer, no planner/router/DAG, no lock acquisition, commands, patches or verification. It retains the same authenticated repository-membership check before/after generation. At most 12 safe text files and 24,000 source characters (6,000 per file) are sampled; hidden/generated/credential paths are excluded. Concurrent evidence changes reject the answer. `answer` is plain text (never HTML); `evidencePaths` identifies the sample, not proof of an exhaustive review. Ask runs cannot pause or approve; cancellation follows room/service shutdown and model timeout. Coding routing, confidence gates and recovery policy are unchanged.
+
 | Event | Direction | Payload | Ack |
 | --- | --- | --- | --- |
 | `run:start` | C→S | `{ task }` | `{ ok: true, runId }` or `{ ok: false, code: "BAD_REQUEST" \| "NOT_AVAILABLE" }` (PROPOSED: no harness on this server) |
@@ -58,6 +61,8 @@ OpenAI Decisions is the primary Master-1 scorer (`routerMode: "openai"`, matchin
 | `run:event` | S→room | `RunEvent` | Every member reads every run (LLD 11); only the owner may act. |
 
 ## Browser rules
+
+Production errors include additive safe `code` and `phase` fields. Display the phase when available; `nodeIndex: -1` means before execution, never “step 0”. Model synthesis failures belong to `edit_code`, not the last successful discovery tool. Provider bodies, credentials, repository content and private reasoning are never included in errors. Failed model attempts remain counted in operator receipts.
 
 1. Keep one `RunView` per run; replace it only when `seq` is greater than the stored one.
 2. The plant shows the signed-in user's highest-priority run: `error > awaiting_approval > blocked > executing > routing > planning > done > idle`. `paused` shows as the firmware's `paused` face; `done` shows for a few seconds, then `idle`.

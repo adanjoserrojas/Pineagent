@@ -60,6 +60,9 @@ export type RunStep = { tool: string; detail: string; writes: string[] };
 export type RunCandidate = { id: string; score: number; steps: RunStep[] };
 
 export type RunView = {
+  mode?: "ask" | "code";
+  answer?: string;
+  evidencePaths?: string[];
   runId: string;
   ownerId: string;
   ownerName: string;
@@ -75,7 +78,7 @@ export type RunView = {
   confidence?: number;
   writeSet: string[];
   blockedOn?: { path: string; holder: string };
-  error?: { nodeIndex: number; message: string };
+  error?: { nodeIndex: number; message: string; code?: string; phase?: string };
   startedAt: number;
   endedAt?: number;
 };
@@ -155,7 +158,7 @@ export interface ClientToServerEvents {
   "tree:create": (msg: { path: string; kind: "file" | "dir" }, ack: (res: TreeCreateAck) => void) => void;
   "git:status": (msg: Record<string, never>, ack: (res: GitStatusAck) => void) => void;
   "git:commit": (msg: { paths: string[]; message: string; push: boolean }, ack: (res: GitCommitAck) => void) => void;
-  "run:start": (msg: { task: string }, ack: (res: RunStartAck) => void) => void;
+  "run:start": (msg: { task: string; mode?: "ask" | "code" }, ack: (res: RunStartAck) => void) => void;
   "run:list": (msg: Record<string, never>, ack: (res: { ok: true; runs: RunView[] }) => void) => void;
   "run:approve": (
     msg: { runId: string; candidateId: string } | { runId: string; none: true; hint: string },

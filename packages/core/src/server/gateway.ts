@@ -374,9 +374,9 @@ export function createGateway(opts: GatewayOptions) {
       j.changes.poke();
     });
 
-    socket.on("run:start", async ({ task }, ack) => {
+    socket.on("run:start", async ({ task, mode }, ack) => {
       const j = await joined(true);
-      ack(j ? j.harness.start({ id: user.id, name: user.name }, task) : { ok: false, code: "BAD_REQUEST" });
+      ack(j ? j.harness.start({ id: user.id, name: user.name }, task, mode) : { ok: false, code: "BAD_REQUEST" });
     });
 
     socket.on("run:list", async (_msg, ack) => {

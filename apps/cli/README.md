@@ -21,6 +21,9 @@ Run without arguments for the TUI, `--check` for login/run-list verification, or
 exits the TUI. Commands include `runs`, `pause ID`, `resume ID`,
 `approve ID CANDIDATE`, `reject ID HINT`, `read PATH`, `lock PATH`, `unlock PATH`,
 and `git-status`. Approval always requires an explicit command.
+Use `ask QUESTION` for bounded, read-only repository answers. `run TASK` remains
+the frozen coding path. Answers appear in the existing scrollable Runs panel;
+Ask never authorizes edits, shell commands or tests and cannot be paused/approved.
 Use Page Up / Page Down to inspect run and candidate DAG steps, write sets and
 failure details; Home returns to the first run. Very small terminals show a
 resize hint instead of an unusable layout.

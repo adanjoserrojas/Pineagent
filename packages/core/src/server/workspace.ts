@@ -335,6 +335,45 @@ export class Workspace {
     return file && "content" in file ? file : null;
   }
 
+  // Model evidence is stricter than browser viewing: aliases must not disguise
+  // excluded files. Validate disk identity even if a browser cached this path.
+  async readUnaliased(path: string): Promise<FileState | null> {
+    const full = this.resolvePath(path);
+    if (!full) return null;
+    try {
+      if (!(await this.inside(full, true))) return null;
+      const before = await lstat(full);
+      if (!before.isFile() || before.nlink !== 1 || before.size > MAX_FILE_BYTES) return null;
+      const handle = await openFile(full, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const opened = await handle.stat();
+        if (opened.dev !== before.dev || opened.ino !== before.ino || opened.nlink !== 1) return null;
+        const bytes = Buffer.alloc(MAX_FILE_BYTES + 1);
+        const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+        const after = await handle.stat();
+        if (bytesRead > MAX_FILE_BYTES || bytesRead !== before.size || after.size !== before.size
+          || after.mtimeMs !== before.mtimeMs || after.nlink !== 1 || !(await this.inside(full, true))) return null;
+        const current = await lstat(full);
+        if (current.dev !== opened.dev || current.ino !== opened.ino) return null;
+        const content = bytes.subarray(0, bytesRead).toString("utf8");
+        if (content.includes("\0")) return null;
+        const cached = this.files.get(path);
+        if (cached && cached.content !== content) return null;
+        const state = cached ?? { content, version: this.restoredVersions.get(path) ?? 1 };
+        this.files.set(path, state);
+        return { ...state };
+      } finally { await handle.close(); }
+    } catch { return null; }
+  }
+
+  // Synchronous final check: no await between this and publishing an answer.
+  matchesReadSnapshots(snapshots: readonly { path: string; content: string; version: number }[]): boolean {
+    return snapshots.every(seen => {
+      const current = this.files.get(seen.path);
+      return current?.version === seen.version && current.content === seen.content;
+    });
+  }
+
   async applyOps(path: string, userId: string, baseVersion: number, ops: Op[], runId?: string, authorized?: () => boolean): Promise<OpsResult> {
     while (this.gate && (this.gate.paths === "all" || this.gate.paths.has(path))) await this.gate.open;
     return this.applyOpsInside(path, userId, baseVersion, ops, runId, authorized);
@@ -407,13 +446,11 @@ export class Workspace {
       if (i < parts.length - 1 && !info.isDirectory()) throw new Error("Invalid evidence parent");
       if (i === parts.length - 1 && (!info.isFile() || info.size > MAX_FILE_BYTES)) throw new Error("Unsupported evidence file");
     }
-    const content = await readFile(full, "utf8");
-    if (content.includes("\0")) throw new Error("Unsupported evidence file");
-    const cached = this.files.get(path);
-    if (cached && cached.content !== content) throw new Error("Evidence changed outside workspace authority");
-    const state = cached ?? { content, version: this.restoredVersions.get(path) ?? 1 };
-    this.files.set(path, state);
-    return { ...state };
+    // Share Ask's handle identity and bounded-read checks for existing files.
+    // A failed existing-file read must never become a creation observation.
+    const state = await this.readUnaliased(path);
+    if (!state) throw new Error("Unsupported evidence file or content changed outside workspace authority");
+    return state;
   }
 
   // Stage the whole patch under the workspace barrier. Validation failures publish

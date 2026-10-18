@@ -44,11 +44,13 @@ export class MockHarness implements Harness {
     return [...this.runs.values()].map((r) => r.view);
   }
 
-  start(owner: Owner, task: unknown): RunStartAck {
+  start(owner: Owner, task: unknown, mode: unknown = "code"): RunStartAck {
+    if (mode !== "ask" && mode !== "code") return { ok: false, code: "BAD_REQUEST" };
     if (typeof task !== "string" || !task.trim() || task.length > MAX_TASK) return { ok: false, code: "BAD_REQUEST" };
     const runId = `run-${++this.seq}`;
     const run: Run = {
       view: {
+        mode,
         runId,
         ownerId: owner.id,
         ownerName: owner.name,
@@ -91,7 +93,7 @@ export class MockHarness implements Harness {
     const run = this.runs.get(runId);
     if (!run) return { ok: false, code: "NOT_FOUND" };
     if (run.view.ownerId !== userId) return { ok: false, code: "NOT_OWNER" };
-    if (run.view.state === "done" || run.view.state === "error") return { ok: false, code: "NOT_WAITING" };
+    if (run.view.mode === "ask" || run.view.state === "done" || run.view.state === "error") return { ok: false, code: "NOT_WAITING" };
     run.paused = true;
     return { ok: true };
   }
@@ -113,6 +115,12 @@ export class MockHarness implements Harness {
   // --- The scripted pipeline ----------------------------------------------------------------
 
   private async drive(run: Run) {
+    if (run.view.mode === "ask") {
+      this.update(run, { state: "executing" });
+      await this.sleep();
+      if (!this.closed) this.update(run, { state: "done", endedAt: Date.now(), answer: "Mock read-only answer: this fixture is a collaborative workspace. No files were changed.", evidencePaths: [] });
+      return;
+    }
     const task = run.view.task.toLowerCase();
     const target = await this.pickFile(task);
 

@@ -40,7 +40,10 @@ it.runIf(Boolean(process.env.MY_APP_SOURCE && process.env.PINEAGENT_PTY_ROOT && 
       protect: async ws => { room = new RoomSandbox(ws, sandboxHost); },
       harness: context => {
         harness = new LiveHarness({ context,
-          model: () => ({ plan: async () => ({ allowedWrites: ["app.py"], visibleTestPath: "test_app.py" }),
+          model: () => ({ answer: async input => {
+              expect(input.evidence).toContain("app.py");
+              return "This is a Flask task app. No files changed.";
+            }, plan: async () => ({ allowedWrites: ["app.py"], visibleTestPath: "test_app.py" }),
             patch: async (input, _signal, recovery) => {
               patches.push(Boolean(recovery));
               expect(input.evidence).toContain("FILE app.py\n");
@@ -67,12 +70,21 @@ it.runIf(Boolean(process.env.MY_APP_SOURCE && process.env.PINEAGENT_PTY_ROOT && 
       const opened = await socket.timeout(30_000).emitWithAck("terminal:open", { cols: 140, rows: 35 });
       expect(opened.ok).toBe(true); if (!opened.ok) throw Error("Terminal failed");
       await expect.poll(() => screen, { timeout: 15000 }).toContain("Connected.");
+      expect(await socket.emitWithAck("terminal:input", { id: opened.id, data: "ask What does this app do?\r" })).toEqual({ ok: true });
+      await expect.poll(() => harness?.list()[0]?.state, { timeout: 15000 }).toBe("done");
+      expect(harness!.list()[0]).toMatchObject({ mode: "ask", writeSet: [], routerMode: null, answer: "This is a Flask task app. No files changed." });
+      // Ratatui advances the cursor between words instead of emitting spaces.
+      await expect.poll(() => screen.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, " "), { timeout: 10000 }).toContain("Flask task app");
+      expect(patches).toEqual([]);
+      expect(checks).toEqual([]);
+      expect(await readFile(join(workspace, "app.py"), "utf8")).toBe(regression);
       expect(await socket.emitWithAck("terminal:input", { id: opened.id, data: "run Fix create_task() to reject whitespace-only titles.\r" })).toEqual({ ok: true });
-      await expect.poll(() => harness?.list()[0]?.state, { timeout: 90_000 }).toBe("done");
+      await expect.poll(() => harness?.list()[1]?.state, { timeout: 90_000 }).toBe("done");
       expect(patches).toEqual([false, true]);
       expect(checks.map(check => check.exitCode)).toEqual([1, 1, 0]);
       expect(checks.at(-1)!.output).toContain("5 passed");
-      expect(receipts).toMatchObject([{ modelCalls: 3, executorModelCalls: 2, codingRecovery: "warm_agent", status: "done" }]);
+      expect(receipts).toMatchObject([{ mode: "ask", modelCalls: 1, executorModelCalls: 0, status: "done" },
+        { mode: "code", modelCalls: 3, executorModelCalls: 2, codingRecovery: "warm_agent", status: "done" }]);
       const active = await gateway.room("ws:my-app:main");
       expect(await active.ws.read("app.py")).toMatchObject({ version: 3, content: original });
       expect(active.ws.allLocks()).toEqual([]);
