@@ -97,7 +97,7 @@ button { font: inherit; }
   height: 24px; padding: 0 6px; border: 1px solid var(--you); border-radius: 3px; background: var(--ground);
   color: var(--text); font: inherit; outline: none;
 }
-.create-input[aria-invalid="true"] { border-color: var(--danger); }
+.create-input[aria-invalid="true"], .create-input[aria-invalid="true"]:focus { border-color: var(--danger); outline: none; box-shadow: none; }
 .create-error {
   margin: 0; padding: 4px 6px; border: 1px solid var(--danger); border-top: 0; border-radius: 0 0 3px 3px;
   background: #2a1517; color: var(--danger); font-size: 12px; line-height: 1.35;
