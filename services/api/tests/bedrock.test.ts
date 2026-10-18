@@ -8,6 +8,7 @@ describe("bounded Opus model gateway", () => {
       const prompt = JSON.parse(input.messages![0].content![0].text!);
       expect(prompt.protectedTests).toEqual(["test_app.py"]);
       expect(prompt.writePolicy).toContain("EVEN IN CODE MODE");
+      expect(prompt.writePolicy).toContain("absent from the evidence file list");
       expect(input.toolConfig).toBeUndefined();
       return { $metadata: {}, stream: (async function* () {
         yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: "Use a new test file; existing tests are protected." } } };
