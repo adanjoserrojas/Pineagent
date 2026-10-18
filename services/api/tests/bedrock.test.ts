@@ -3,6 +3,38 @@ import { OpusRun, OPUS_MODEL, type ModelTransport } from "../src/models/bedrock"
 import { contentHash } from "@pineagent/harness";
 
 describe("bounded Opus model gateway", () => {
+  it("labels existing tests as read-only and accepts separate new coverage", async () => {
+    const run = new OpusRun({ runId: "r", ownerId: "alice", transport: async input => {
+      const prompt = JSON.parse(input.messages![0].content![0].text!);
+      expect(prompt.protectedTests).toEqual(["banking/test_accounts.py"]);
+      expect(prompt.writePolicy).toContain("Never include a protectedTests path in allowedWrites");
+      return { $metadata: {}, stream: (async function* () {
+        yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: JSON.stringify({
+          allowedWrites: ["banking/accounts.py", "banking/test_addition.py"],
+          visibleTestPath: "banking/test_addition.py", acceptanceCriteria: ["Addition returns 2"],
+        }) } } };
+        yield { messageStop: { stopReason: "end_turn" } };
+      })() };
+    } });
+    await expect(run.plan("Add a method", ["banking/accounts.py", "banking/test_accounts.py"]))
+      .resolves.toMatchObject({ createPaths: ["banking/test_addition.py"] });
+    expect(run.receipts()).toHaveLength(1);
+  });
+  it("reports attempted existing-test writes without weakening validation or retrying", async () => {
+    const run = new OpusRun({ runId: "r", ownerId: "alice", transport: async () => ({
+      $metadata: {}, stream: (async function* () {
+        yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: JSON.stringify({
+          allowedWrites: ["banking/accounts.py", "banking/test_accounts.py"],
+          visibleTestPath: "banking/test_accounts.py", acceptanceCriteria: ["Addition returns 2"],
+        }) } } };
+        yield { messageStop: { stopReason: "end_turn" } };
+      })(),
+    }) });
+    await expect(run.plan("Add a method", ["banking/accounts.py", "banking/test_accounts.py"]))
+      .rejects.toMatchObject({ code: "MODEL_PLAN_TEST_WRITE" });
+    expect(run.receipts()).toMatchObject([{ status: "failed", failureCode: "MODEL_PLAN_TEST_WRITE" }]);
+    expect(run.receipts()).toHaveLength(1);
+  });
   it.each(["", "   ", "x".repeat(12001), "unsafe\u0000answer"])("rejects empty, oversized or control-character answers", async text => {
     const run = new OpusRun({ runId: "r", ownerId: "alice", transport: async () => ({
       $metadata: {}, stream: (async function* () {

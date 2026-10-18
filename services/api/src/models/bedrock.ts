@@ -2,7 +2,7 @@ import {
   BedrockRuntimeClient, ConverseStreamCommand,
   type ConverseStreamCommandInput, type ConverseStreamCommandOutput,
 } from "@aws-sdk/client-bedrock-runtime";
-import { validateFeaturePlan, type FeaturePlan } from "../harness/feature-plan";
+import { isAcceptanceTest, validateFeaturePlan, type FeaturePlan } from "../harness/feature-plan";
 import { materializePatch, contentHash, type FileSnapshot } from "@pineagent/harness";
 
 export const OPUS_MODEL = "us.anthropic.claude-opus-4-6-v1";
@@ -12,6 +12,7 @@ const MODEL_ERRORS = {
   MODEL_INVALID_ANSWER: "Opus returned an invalid answer. No files were changed; try rephrasing your question.",
   MODEL_INVALID_JSON: "Opus returned invalid JSON; no patch authorized.",
   MODEL_INVALID_PLAN: "Opus could not produce a supported coding plan. Use Ask for questions or describe a concrete code change; no patch authorized.",
+  MODEL_PLAN_TEST_WRITE: "The model tried to modify an existing test. Request source changes and, if needed, a separate new test file. Existing tests stay protected; no patch authorized.",
   MODEL_INVALID_PATCH: "Opus returned an invalid file replacement; no patch authorized.",
   MODEL_PATCH_SCOPE: "Opus proposed files outside the approved write set; no patch authorized.",
   MODEL_INCOMPLETE: "Opus stopped before completing its response; no patch authorized.",
@@ -79,9 +80,14 @@ export class OpusRun {
   }
 
   async plan(task: string, files: string[], signal?: AbortSignal): Promise<FeaturePlan> {
-    const { value } = await this.generate("plan", { task, files }, signal, (value) => {
+    const protectedTests = files.filter(isAcceptanceTest);
+    const { value } = await this.generate("plan", { task, files, protectedTests,
+      writePolicy: "Never include a protectedTests path in allowedWrites. An existing test may be visibleTestPath only. If new behavior needs coverage, plan a separate new test file absent from files; include its path in allowedWrites and provide acceptanceCriteria. Use full repository-relative paths from files for existing sources." }, signal, (value) => {
       try { return validateFeaturePlan(value, files); }
-      catch { throw new ModelFailure("MODEL_INVALID_PLAN"); }
+      catch (error) {
+        throw new ModelFailure(error instanceof Error && error.message === "Existing verification files are immutable"
+          ? "MODEL_PLAN_TEST_WRITE" : "MODEL_INVALID_PLAN");
+      }
     });
     return value;
   }
