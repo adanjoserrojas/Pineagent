@@ -6,7 +6,8 @@ import { taskTerms } from "../../../../harness/dist/src/sandbox-tools.js";
 
 type Snapshot = { content: string; version: number };
 export type EvidenceVersions = Map<string, Snapshot>;
-const TEXT = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".json", ".md", ".py", ".toml", ".txt", ".ini", ".cfg"]);
+const TEXT = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".json", ".md"]);
+const PYTHON_TEXT = new Set([".py", ".toml", ".txt", ".ini", ".cfg", ".json", ".md"]);
 
 /** Backend authority adapter. No direct filesystem mutation or host processes. */
 export class BackendTools implements ToolRuntime {
@@ -15,6 +16,7 @@ export class BackendTools implements ToolRuntime {
   readonly observations: EvidenceVersions;
   constructor(private readonly options: {
     ws: Workspace; ownerId: string; runId: string; allowedWrites: string[];
+    validator?: "node" | "python";
     files(): Promise<string[]>;
     runTests(testPath?: string | null): Promise<TestResult>;
     changed(path: string, version: number, ops: Op[], author: string): void;
@@ -44,7 +46,8 @@ export class BackendTools implements ToolRuntime {
   listFiles(): Promise<string[]> {
     return this.record("list_files", {}, async () => {
       const files = (await this.options.files()).filter(path => this.options.ws.resolvePath(path)
-        && !path.split("/").some(part => ["node_modules", ".venv", "venv", "__pycache__", "site-packages"].includes(part)));
+        && !path.split("/").some(part => (this.options.validator === "python"
+          ? ["node_modules", ".venv", "venv", "__pycache__", "site-packages"] : ["node_modules"]).includes(part)));
       if (files.length > 4000) throw new Error("Repository exceeds bounded discovery limit");
       return [...new Set(files)].sort();
     });
@@ -67,7 +70,7 @@ export class BackendTools implements ToolRuntime {
       const terms = Array.isArray(query) ? query : taskTerms(query);
       const hits: { path: string; score: number }[] = [];
       for (const path of await this.listFiles()) {
-        if (!TEXT.has(extname(path).toLowerCase())) continue;
+        if (!(this.options.validator === "python" ? PYTHON_TEXT : TEXT).has(extname(path).toLowerCase())) continue;
         const text = (await this.readText(path)).toLowerCase();
         let score = 0;
         for (const term of terms) {

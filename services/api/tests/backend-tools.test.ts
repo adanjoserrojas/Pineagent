@@ -5,6 +5,16 @@ import { expect, it } from "vitest";
 import { Workspace } from "@pineagent/core/server";
 import { BackendTools } from "../src/harness/tools";
 
+it("keeps Python and auxiliary files out of unchanged Node search rankings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pineagent-language-search-"));
+  const files = { "value.mjs": "export const value = 1", "value.py": "value = 2", "notes.txt": "value" };
+  for (const [path, content] of Object.entries(files)) await writeFile(join(root, path), content);
+  const options = { ws: new Workspace(root, { leaseMs: 30000, idleMs: 600000 }), ownerId: "alice", runId: "r",
+    allowedWrites: [], files: async () => Object.keys(files), runTests: async () => ({ exitCode: 0, output: "" }), changed: () => {}, boundary: async () => {} };
+  expect((await new BackendTools(options).searchCode(["value"])).map(hit => hit.path)).toEqual(["value.mjs"]);
+  expect((await new BackendTools({ ...options, validator: "python" }).searchCode(["value"])).map(hit => hit.path)).toEqual(["value.py", "notes.txt"]);
+});
+
 it("applies a model patch only through the run's lock and observed file version", async () => {
   const root = await mkdtemp(join(tmpdir(), "pineagent-tools-"));
   await mkdir(join(root, "src"));

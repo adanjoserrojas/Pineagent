@@ -133,7 +133,7 @@ export class LiveHarness implements Harness {
       run.abort.signal.throwIfAborted();
     };
     const runtime = (allowedWrites: string[], outputLimit = 48_000) => new BackendTools({ ws: context.ws, ownerId, runId,
-      allowedWrites, outputLimit, observations, files: context.files, boundary,
+      allowedWrites, outputLimit, observations, validator, files: context.files, boundary,
       changed: context.events.fileChanged, runTests: path => this.options.runTests(ownerId, runId, path, validator),
       progress: event => {
         const i = run.view.steps.findIndex(step => step.tool === event.name);

@@ -16,7 +16,7 @@ Evidence must still contain a source and the visible test before synthesis. Pyth
 source classification replaces the JavaScript-specific `src/` convention, not the gate.
 
 Production selects the adapter from the validated visible test and rejects mixed
-Python/non-Python write scopes. Python test/config files cannot be patch targets.
+Python/non-Python write scopes. Python tests and test-runner configuration cannot be patch targets.
 Backend reads, version observations, atomic run locks, patch writes, and broadcasts
 remain authoritative. Tests use the same read-only Docker isolation and 120-second
 timeout, with fixed argv for pytest instead of Node. A zero-test pytest result fails.

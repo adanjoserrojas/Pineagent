@@ -23,6 +23,6 @@
   "additions": {
     "test/backend-runtime.test.ts": "8c2aa62bd607838ba77bab486c98eb94ccba0fb81a188fc3be95e3eaf8b7e3db",
     "docs/INTEGRATION_REVISION_1.md": "ebed0562bb562ecbc5eb07a0e9439f5b0c610113e438b74edd09bee32c891477",
-    "docs/INTEGRATION_REVISION_2.md": "f8147793cc2294c897205393ce65790dbb8cd25debe9976c810043a5ec25bff4"
+    "docs/INTEGRATION_REVISION_2.md": "c98090641c325412f607efb3c2c610f08b204a97ddfdf0ef56a1cf3ee437e349"
   }
 }

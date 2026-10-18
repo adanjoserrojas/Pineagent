@@ -30,7 +30,7 @@ export class RoomSandbox {
     if (!ownerId || !runId || (testPath && !this.ws.resolvePath(testPath))) throw new Error("Invalid verification scope");
     if (!["node", "python"].includes(validator) || (testPath && !(validator === "python" ? /\.py$/ : /\.[cm]?js$/).test(testPath))) throw new Error("Unsupported verification language");
     const argv = validator === "python"
-      ? ["/opt/python/bin/python", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider", "--basetemp=/tmp/pytest", testPath ? `/workspace/${testPath}` : "/workspace"]
+      ? ["/opt/python/bin/python", "-I", "-B", "/opt/python/bin/pytest", "-q", "-p", "no:cacheprovider", "--basetemp=/tmp/pytest", testPath ? `/workspace/${testPath}` : "/workspace"]
       : ["node", "--test", ...(testPath ? [`/workspace/${testPath}`] : [])];
     // Verification must not modify the implementation or its tests. Patch
     // writes go through Workspace.applyOps, never a writable test container.
