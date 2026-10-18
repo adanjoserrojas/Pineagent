@@ -1,11 +1,42 @@
 import { expect, test, type Page } from "@playwright/test";
-import { home } from "./rooms";
+import { expandTo, home, openFile } from "./rooms";
 
 const tree = (page: Page) => page.getByRole("tree", { name: "Files" });
 const row = (page: Page, path: string) => tree(page).locator(`[data-path="${path}"]`);
+const explorer = (page: Page) => page.getByRole("navigation", { name: "Explorer" });
+
+// Starts the inline "new file" row; the box is focused and typed into like a user would.
+async function startNew(page: Page, kind: "file" | "folder", name?: string) {
+  await page.getByRole("button", { name: kind === "file" ? "New file" : "New folder" }).click();
+  const box = page.getByRole("textbox", { name: kind === "file" ? "New file name" : "New folder name" });
+  await expect(box).toBeFocused();
+  if (name) await box.pressSequentially(name);
+  return box;
+}
+
+test("folders start collapsed; Expand all and Collapse all work", async ({ page }) => {
+  await page.goto(home("alice"));
+  await expect(row(page, "src/")).toHaveAttribute("aria-expanded", "false");
+  await expect(row(page, "src/auth.ts")).toHaveCount(0);
+  await page.getByRole("button", { name: "Expand all folders" }).click();
+  await expect(row(page, "src/routes/users.ts")).toBeVisible();
+  await page.getByRole("button", { name: "Collapse all folders" }).click();
+  await expect(row(page, "src/auth.ts")).toHaveCount(0);
+});
+
+test("opening a file from the filter reveals its row, folders opened on the way", async ({ page }) => {
+  await page.goto(home("alice"));
+  await expect(row(page, "src/")).toBeVisible();
+  await openFile(page, "src/routes/users.ts");
+  await expect(row(page, "src/")).toHaveAttribute("aria-expanded", "true");
+  await expect(row(page, "src/routes/users.ts")).toBeInViewport();
+  await expect(row(page, "src/routes/users.ts")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("searchbox", { name: "Filter files" })).toBeFocused(); // reveal doesn't steal focus
+});
 
 test("shows nested folders and collapses them with the keyboard", async ({ page }) => {
   await page.goto(home("alice"));
+  await expandTo(page, "src/routes/users.ts");
   await expect(row(page, "src/routes/users.ts")).toBeVisible();
   await expect(row(page, "src/routes/users.ts")).toHaveAttribute("aria-level", "3");
 
@@ -24,7 +55,7 @@ test("shows nested folders and collapses them with the keyboard", async ({ page 
 
 test("filters with / and opens the first match with Enter", async ({ page }) => {
   await page.goto(home("alice"));
-  await expect(row(page, "src/auth.ts")).toBeVisible();
+  await expect(row(page, "src/")).toBeVisible();
   await tree(page).locator('[tabindex="0"]').focus();
   await page.keyboard.press("/");
   await expect(page.getByRole("searchbox", { name: "Filter files" })).toBeFocused();
@@ -37,6 +68,7 @@ test("filters with / and opens the first match with Enter", async ({ page }) => 
 
 test("opening a file loads its contents and switching files swaps them", async ({ page }) => {
   await page.goto(home("alice"));
+  await expandTo(page, "src/auth.ts");
   await row(page, "src/auth.ts").click();
   const code = page.locator(".monaco-editor .view-lines");
   await expect(code).toContainText("currentUser");
@@ -51,6 +83,8 @@ test("another person's open file shows their avatar on the row", async ({ page, 
   await page.goto(home("alice"));
   const bob = await (await browser.newContext()).newPage();
   await bob.goto(home("bob"));
+  await expandTo(page, "src/auth.ts");
+  await expandTo(bob, "src/auth.ts");
   await expect(row(bob, "src/auth.ts")).toBeVisible();
 
   await row(page, "src/auth.ts").click();
@@ -72,6 +106,8 @@ test("uncommitted changes show an M on the file and a dot on its folders, for ev
   await page.goto(home("alice"));
   const bob = await (await browser.newContext()).newPage();
   await bob.goto(home("bob"));
+  await expandTo(page, "src/auth.ts");
+  await expandTo(bob, "src/auth.ts");
   await expect(row(bob, "src/auth.ts")).toBeVisible();
   await expect(bob.getByRole("radio", { name: "Changed · 0" })).toBeVisible();
 
@@ -104,51 +140,117 @@ test("creates a file and a folder from the explorer, and others see them", async
   await page.goto(home("alice"));
   const bob = await (await browser.newContext()).newPage();
   await bob.goto(home("bob"));
-  await expect(row(page, "src/auth.ts")).toBeVisible();
-  await expect(row(bob, "src/auth.ts")).toBeVisible();
+  await expect(row(page, "src/")).toBeVisible();
+  await expect(row(bob, "src/")).toBeVisible();
 
-  // A new file, folders included, opens in the editor and is marked as added.
-  await page.getByRole("button", { name: "New file" }).click();
-  const field = page.getByRole("textbox", { name: "New file path" });
-  await expect(field).toBeFocused();
+  // With nothing picked the row sits at the top of the repo root. A nested name makes the folders too;
+  // the file opens in the editor and is marked as added.
+  const field = await startNew(page, "file");
+  await expect(tree(page).locator("li").first()).toHaveClass(/tree-create/);
   await field.fill("src/utils/date.ts");
   await field.press("Enter");
   await expect(row(page, "src/utils/date.ts")).toBeVisible();
   await expect(page.getByRole("tab", { name: "src/utils/date.ts" })).toBeVisible();
+  await expect(row(page, "src/utils/date.ts")).toHaveAttribute("aria-selected", "true");
   await expect(row(page, "src/utils/date.ts").getByTestId("git-status")).toHaveText(/A/);
+  await expandTo(bob, "src/utils/date.ts");
   await expect(row(bob, "src/utils/date.ts")).toBeVisible();
 
   // A new folder goes inside the folder you picked; the same name twice is refused.
+  await expandTo(page, "src/routes/users.ts");
   await row(page, "src/routes/").click();
-  await page.getByRole("button", { name: "New folder" }).click();
-  const dirField = page.getByRole("textbox", { name: "New folder path" });
-  await expect(dirField).toHaveValue("src/routes/");
-  await dirField.pressSequentially("v2");
+  const dirField = await startNew(page, "folder", "v2");
   await dirField.press("Enter");
   await expect(row(page, "src/routes/v2/")).toBeVisible();
+  await expect(row(page, "src/routes/v2/")).toBeFocused();
+  await expandTo(bob, "src/routes/v2/");
   await expect(row(bob, "src/routes/v2/")).toBeVisible();
 
-  await page.getByRole("button", { name: "New folder" }).click();
-  await page.getByRole("textbox", { name: "New folder path" }).fill("src/routes/v2");
-  await page.getByRole("textbox", { name: "New folder path" }).press("Enter");
-  await expect(page.getByRole("navigation", { name: "Explorer" }).getByRole("alert")).toHaveText("Something with that name is already there.");
-  await page.getByRole("textbox", { name: "New folder path" }).press("Escape");
-  await expect(page.getByRole("textbox", { name: "New folder path" })).toHaveCount(0);
+  await row(page, "src/routes/").click();
+  const again = await startNew(page, "folder", "v2");
+  await again.press("Enter");
+  await expect(explorer(page).getByRole("alert")).toContainText("“v2” already exists");
+  await again.press("Escape");
+  await expect(again).toHaveCount(0);
 
   // The empty folder is still there after a reload, even though Git doesn't track it.
   await page.reload();
+  await expandTo(page, "src/routes/v2/");
   await expect(row(page, "src/routes/v2/")).toBeVisible();
+});
+
+test("the new-file row goes in the selected folder, one level in", async ({ page }) => {
+  await page.goto(home("alice"));
+  await expandTo(page, "src/routes/users.ts");
+  await row(page, "src/routes/").click(); // closes it
+  await expect(row(page, "src/routes/")).toHaveAttribute("aria-expanded", "false");
+  const field = await startNew(page, "file", "health.ts");
+  // Opened again for the new row, right under its folder, with the child indent (10 + 2 * 16).
+  await expect(row(page, "src/routes/")).toHaveAttribute("aria-expanded", "true");
+  const line = tree(page).locator('[data-path="src/routes/"] + li.tree-create');
+  await expect(line).toHaveCSS("padding-left", "42px");
+  await field.press("Enter");
+  await expect(row(page, "src/routes/health.ts")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "src/routes/health.ts" })).toBeVisible();
+
+  // A selected file means its parent folder.
+  await row(page, "src/routes/users.ts").click();
+  const next = await startNew(page, "file");
+  await expect(tree(page).locator('[data-path="src/routes/"] + li.tree-create')).toHaveCount(1);
+  await next.press("Escape");
+});
+
+test("leaving the new-file box creates when it has text, cancels when empty; Escape cancels", async ({ page }) => {
+  await page.goto(home("alice"));
+  await expect(row(page, "src/")).toBeVisible();
+
+  const blurred = await startNew(page, "file", "blurred.md");
+  await page.getByRole("heading", { name: "Explorer" }).click();
+  await expect(row(page, "blurred.md")).toBeVisible();
+  await expect(blurred).toHaveCount(0);
+
+  const empty = await startNew(page, "file");
+  await page.getByRole("heading", { name: "Explorer" }).click();
+  await expect(empty).toHaveCount(0);
+  await expect(explorer(page).getByRole("alert")).toHaveCount(0);
+
+  const typed = await startNew(page, "file", "never.md");
+  await typed.press("Escape");
+  await expect(typed).toHaveCount(0);
+  await expect(row(page, "never.md")).toHaveCount(0);
+});
+
+test("a refused name keeps the row and explains why right under it", async ({ page }) => {
+  await page.goto(home("alice"));
+  await expect(row(page, "README.md")).toBeVisible();
+  const field = await startNew(page, "file", "README.md");
+  await field.press("Enter");
+  await expect(explorer(page).getByRole("alert")).toHaveText("A file or folder named “README.md” already exists here.");
+  await expect(field).toBeVisible();
+  await expect(field).toHaveAttribute("aria-invalid", "true");
+
+  await field.fill("");
+  await field.press("Enter");
+  await expect(explorer(page).getByRole("alert")).toHaveText("Type a file name, like notes.md.");
+  await field.fill("docs/");
+  await field.press("Enter");
+  await expect(explorer(page).getByRole("alert")).toHaveText("Type a file name, like notes.md.");
+  await field.fill("fresh.md"); // typing clears the message
+  await expect(explorer(page).getByRole("alert")).toHaveCount(0);
+  await field.press("Enter");
+  await expect(row(page, "fresh.md")).toBeVisible();
 });
 
 test("a long file list scrolls inside the explorer instead of stretching the page", async ({ page }) => {
   test.setTimeout(60_000); // creates files one by one through the UI
   await page.setViewportSize({ width: 1280, height: 560 });
   await page.goto(home("alice"));
-  await expect(row(page, "src/auth.ts")).toBeVisible();
+  await expect(row(page, "src/")).toBeVisible();
   for (let i = 10; i < 30; i++) {
-    await page.getByRole("button", { name: "New file" }).click();
-    await page.getByRole("textbox", { name: "New file path" }).fill(`many/file-${i}.ts`);
-    await page.getByRole("textbox", { name: "New file path" }).press("Enter");
+    // The first creates many/; after that the new file is selected, so the next one lands beside it.
+    const field = await startNew(page, "file");
+    await field.fill(i === 10 ? `many/file-${i}.ts` : `file-${i}.ts`);
+    await field.press("Enter");
     await expect(row(page, `many/file-${i}.ts`)).toBeVisible();
   }
   const sizes = () =>

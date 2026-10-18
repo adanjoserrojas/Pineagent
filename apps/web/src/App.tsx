@@ -114,6 +114,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
       <div className="body">
         <nav className="tree" aria-label="Explorer">
           <FileTree
+            key={`${wsId}/${branch}`}
             paths={ws.tree}
             locks={ws.locks}
             changes={ws.changes}

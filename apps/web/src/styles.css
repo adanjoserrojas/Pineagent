@@ -88,9 +88,20 @@ button { font: inherit; }
 .mode-btn[aria-checked="true"] { border-color: #2f4a66; background: #16263a; color: #bfe0ff; }
 .explorer-note { margin: 8px 16px; color: var(--muted); }
 .icon-btn:disabled { opacity: 0.4; cursor: default; background: transparent; }
-.explorer-create .explorer-filter { margin-bottom: 4px; border-color: #2f4a66; }
-.create-hint { margin: 0 12px 10px; font-size: 12px; color: var(--muted); }
-.create-error { color: var(--danger); }
+/* The inline name box (VS Code style): an input row in the target folder, error box right under it. */
+.tree-create { padding: 2px 8px 2px 0; }
+.create-line { display: flex; align-items: flex-start; gap: 6px; padding-top: 2px; }
+.create-line > svg { margin-top: 4px; }
+.create-field { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.create-input {
+  height: 24px; padding: 0 6px; border: 1px solid var(--you); border-radius: 3px; background: var(--ground);
+  color: var(--text); font: inherit; outline: none;
+}
+.create-input[aria-invalid="true"] { border-color: var(--danger); }
+.create-error {
+  margin: 0; padding: 4px 6px; border: 1px solid var(--danger); border-top: 0; border-radius: 0 0 3px 3px;
+  background: #2a1517; color: var(--danger); font-size: 12px; line-height: 1.35;
+}
 
 .tree-list { margin: 0; padding: 0 6px 12px; list-style: none; display: flex; flex-direction: column; gap: 1px; }
 

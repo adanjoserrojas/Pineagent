@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { GitRepo } from "@pineagent/core/server";
+import { openFile } from "./rooms";
 import { startMock } from "../../mock/server";
 
 // Release scenario 7: one user cannot commit another user's uncommitted paths.
@@ -30,7 +31,7 @@ async function joinAs(browser: Browser, name: string): Promise<Page> {
 }
 
 async function editFile(page: Page, path: string, text: string) {
-  await page.locator(`[data-path="${path}"]`).click();
+  await openFile(page, path);
   await expect(page.getByTestId("editor-status")).toContainText("Viewing", { timeout: 15_000 }); // first Monaco load can be slow
   await page.locator(".monaco-editor .view-line").first().click({ position: { x: 2, y: 5 } });
   await page.keyboard.press("Home");
