@@ -28,6 +28,8 @@ export type GatewayOptions = {
   http: HttpServer;
   allowedOrigins: (string | RegExp)[];
   authenticate(token: unknown): Promise<User | null>;
+  // Required for backend-issued scoped sessions; missing validation fails closed.
+  sessionActive?(user: User): boolean;
   // May this user open this repository? (The server asks GitHub; the mock says yes.)
   authorize?(ctx: JoinContext): Promise<"ok" | "NOT_COLLABORATOR" | "UNAVAILABLE">;
   // Make the branch's worktree exist (clone, or a temp copy of a fixture) and return its repo.
@@ -67,6 +69,7 @@ export function createGateway(opts: GatewayOptions) {
     sweepMs: 1_000,
   };
   const log = opts.log ?? (() => {});
+  const active = (user: User) => !user.session || (user.session.expiresAt > Date.now() && opts.sessionActive?.(user) === true);
   const authorOf = opts.author ?? ((u: User) => ({ id: u.id, name: u.name, email: `${u.name}@users.noreply.github.com` }));
   const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(opts.http, {
     cors: { origin: opts.allowedOrigins },
@@ -151,7 +154,7 @@ export function createGateway(opts: GatewayOptions) {
 
   io.use(async (socket, next) => {
     const user = await opts.authenticate(socket.handshake.auth?.token);
-    if (!user) {
+    if (!user || !active(user)) {
       const err = new Error("unauthenticated") as Error & { data?: unknown };
       err.data = { code: UNAUTHENTICATED };
       return next(err);
@@ -177,6 +180,7 @@ export function createGateway(opts: GatewayOptions) {
     if (sweeping) return;
     sweeping = true;
     try {
+      for (const socket of io.sockets.sockets.values()) if (!active(socket.data.user)) socket.disconnect(true);
       for (const [room, pending] of rooms) {
         const r = await pending.catch(() => null);
         try {
@@ -199,6 +203,7 @@ export function createGateway(opts: GatewayOptions) {
 
     // Token bucket per socket: refills EVENTS_PER_SEC, holds EVENT_BURST.
     socket.use((_packet, next) => {
+      if (!active(user)) { socket.disconnect(true); return; }
       const b = socket.data.budget;
       const now = Date.now();
       b.tokens = Math.min(EVENT_BURST, b.tokens + ((now - b.at) / 1000) * EVENTS_PER_SEC);
@@ -217,6 +222,7 @@ export function createGateway(opts: GatewayOptions) {
         return ack({ ok: false, code: "NOT_COLLABORATOR" });
       }
       const room = roomName(wsId, branch);
+      if (user.session && user.session.roomId !== room) return ack({ ok: false, code: "NOT_COLLABORATOR" });
       const ctx = { roomId: room, wsId, branch, user };
       const verdict = opts.authorize ? await opts.authorize(ctx).catch(() => "UNAVAILABLE" as const) : "ok";
       if (verdict !== "ok") {

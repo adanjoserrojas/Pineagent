@@ -13,9 +13,11 @@ import {
   type JoinContext,
   type Store,
   type User,
+  type GatewayOptions,
 } from "@pineagent/core/server";
 import type { Config } from "./config";
 import type { GitHubBroker } from "./github";
+import type { SessionTokens } from "./sandbox/session-tokens";
 
 // Bigger repositories take too long to clone during a demo and fill the disk.
 const MAX_REPO_KB = 500_000;
@@ -29,10 +31,12 @@ export type AppDeps = {
   github: Pick<GitHubBroker, "access" | "githubToken"> | null; // null = GitHub access not configured
   harness?: HarnessFactory; // SE1's harness, once it exists
   store?: Store | null; // null = locks and versions are lost on restart
+  sessions?: SessionTokens;
+  protect?: GatewayOptions["protect"];
   log: Log;
 };
 
-export function createApp({ config, authenticate, github, harness = noHarness, store = null, log }: AppDeps) {
+export function createApp({ config, authenticate, github, harness = noHarness, store = null, sessions, protect, log }: AppDeps) {
   const started = Date.now();
   let storeErrors = 0;
   const logged: Log = (event, fields) => {
@@ -90,7 +94,10 @@ export function createApp({ config, authenticate, github, harness = noHarness, s
   const gateway = createGateway({
     http,
     allowedOrigins: config.allowedOrigins,
-    authenticate,
+    authenticate: async (token) => typeof token === "string" && token.startsWith("pst_")
+      ? sessions?.authenticate(token) ?? null : authenticate(token),
+    sessionActive: (user) => sessions?.active(user) ?? false,
+    protect,
     authorize,
     prepare,
     gitCredentials: async (userId) => (github ? tokenEnv(await github.githubToken(userId)) : {}),
