@@ -1,14 +1,16 @@
 import { DEV_TOOLS } from "../devtools";
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import type { Member, RouterMode, RunActionAck, RunState, RunView } from "../contracts/socket";
 import type { WorkspaceSocket } from "../net/socket";
 import { PlantConnect } from "../plant/PlantConnect";
 import { faceInfo, VirtualPlant } from "../plant/VirtualPlant";
 import { Avatar } from "../ui/Avatar";
+import { ResizeHandle } from "../ui/ResizeHandle";
 import { faceFor, type PlantView } from "./runs";
 
 const ACK_TIMEOUT_MS = 5000;
-const MAX_SHOWN = 12;
+const TASK_HEIGHT_KEY = "pineagent:task-view-height:v1";
+const DEFAULT_TASK_HEIGHT = 300;
 
 const STATE_LABEL: Record<RunState, string> = {
   planning: "planning",
@@ -46,11 +48,21 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
   const [mode, setMode] = useState<"ask" | "code">("ask");
   const [starting, setStarting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [taskHeight, setTaskHeight] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(TASK_HEIGHT_KEY));
+      return Number.isFinite(saved) && saved >= 180 ? Math.min(900, saved) : DEFAULT_TASK_HEIGHT;
+    } catch { return DEFAULT_TASK_HEIGHT; }
+  });
+  const feed = useRef<HTMLDivElement>(null);
+  useEffect(() => { try { localStorage.setItem(TASK_HEIGHT_KEY, String(taskHeight)); } catch { /* Storage is optional. */ } }, [taskHeight]);
 
   const all = [...runs.values()];
   const mine = all.filter((r) => r.ownerId === selfId).sort((a, b) => b.startedAt - a.startedAt);
   const others = all.filter((r) => r.ownerId !== selfId).sort((a, b) => b.startedAt - a.startedAt);
-  const shown = [...mine, ...others].slice(0, MAX_SHOWN);
+  const latest = mine[0] ?? others[0];
+  const shown = latest ? [latest] : [];
+  useEffect(() => { if (feed.current) feed.current.scrollTop = 0; }, [latest?.runId]);
 
   const nameOf = (id: string) => (id === selfId ? "you" : (members.find((m) => m.userId === id)?.name ?? id.replace(/^.*\|/, "")));
 
@@ -85,7 +97,7 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
 
       <VirtualPlant face={plant.face} caption={plantCaption} />
       <PlantConnect />
-      <div className="run-feed">
+      <div className="run-feed" ref={feed} style={{ height: taskHeight }}>
         {shown.length === 0 ? (
           <p className="run-empty">No runs yet. Give your agent a focused task to get growing.</p>
         ) : (
@@ -98,6 +110,8 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
           </ul>
         )}
       </div>
+      <ResizeHandle label="Resize task view" axis="y" value={taskHeight} min={180} max={900}
+        onChange={setTaskHeight} onReset={() => setTaskHeight(DEFAULT_TASK_HEIGHT)} />
       <form className="run-form" onSubmit={start}>
         <fieldset className="run-mode" disabled={starting}>
           <legend>Agent mode</legend>
