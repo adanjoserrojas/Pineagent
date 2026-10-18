@@ -1,8 +1,6 @@
 import { DEV_TOOLS } from "./devtools";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSession } from "./auth/AuthGate";
-import { EditorGroup } from "./editor/EditorGroup";
-import { activate, activePaths, close, focus, focusedActive, initialLayout, isImagePath, openIn, split, type Layout } from "./editor/layout";
 import { SessionManager } from "./editor/sessions";
 import { CommitDialog } from "./git/CommitDialog";
 import { RunsColumn } from "./runs/RunsColumn";
@@ -11,6 +9,7 @@ import { createWorkspaceStore, useWorkspace } from "./state/workspace";
 import { FileTree } from "./tree/FileTree";
 import { CommitButton } from "./git/CommitButton";
 import { MemberChip } from "./ui/ProfileCard";
+import { Avatar } from "./ui/Avatar";
 import { ConnectionPill } from "./ui/ConnectionPill";
 import { RepoPicker } from "./ui/RepoPicker";
 import { workspaceFromPath } from "./routes";
