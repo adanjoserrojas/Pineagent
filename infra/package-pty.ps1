@@ -32,9 +32,14 @@ $lines = @($keys | ForEach-Object { "$_=$($settings[$_])" }) + @("RELEASE_SHA=$s
 Copy-Item infra/sandbox/pineagent-sandbox.service -Destination $release
 docker build --target validation -t pineagent-cli-validation:pty apps/cli
 if ($LASTEXITCODE -ne 0) { throw 'Sandbox image build failed' }
-$imageId = (docker image inspect pineagent-cli-validation:pty --format '{{.Id}}').Trim()
 docker save -o (Join-Path $OutputDirectory "$sha-image.tar") pineagent-cli-validation:pty
 if ($LASTEXITCODE -ne 0) { throw 'Sandbox image export failed' }
+# Docker Desktop's containerd store reports a manifest/index ID; the deployed
+# Docker 25 classic store identifies the same image by its configuration digest.
+# Pin the exported config, not a mutable tag or a store-specific index digest.
+$imageManifest = @(tar -xOf (Join-Path $OutputDirectory "$sha-image.tar") manifest.json | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0 -or $imageManifest.Count -ne 1 -or $imageManifest[0].Config -notmatch '^(?:blobs/sha256/([a-f0-9]{64})|([a-f0-9]{64})\.json)$') { throw 'Invalid exported image manifest' }
+$imageId = 'sha256:' + $(if ($Matches[1]) { $Matches[1] } else { $Matches[2] })
 tar -czf (Join-Path $OutputDirectory "$sha.tgz") -C $release api web api.env pineagent-sandbox.service
 if ($LASTEXITCODE -ne 0) { throw 'Release archive failed' }
 $result = @{ sha=$sha; imageId=$imageId; release=(Join-Path $OutputDirectory "$sha.tgz"); image=(Join-Path $OutputDirectory "$sha-image.tar"); releaseSha256=(Get-FileHash (Join-Path $OutputDirectory "$sha.tgz") -Algorithm SHA256).Hash.ToLower(); imageSha256=(Get-FileHash (Join-Path $OutputDirectory "$sha-image.tar") -Algorithm SHA256).Hash.ToLower() }
