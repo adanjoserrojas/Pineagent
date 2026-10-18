@@ -1,12 +1,9 @@
 // One branch's shared state: its files, their versions, and the lock table.
 // No sockets here, so the rules can be unit-tested with a fake clock.
-import { readFile, realpath, stat, lstat, readdir, open as openFile, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open as openFile, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { resolve, sep, relative, join } from "node:path";
-import type { Lock, LockChangeReason, Op } from "../contracts";
-import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Lock, LockChangeReason, Op, TreeCreateAck } from "../contracts";
 import { applyOps } from "../ops";
 import type { RoomStore } from "./store";
