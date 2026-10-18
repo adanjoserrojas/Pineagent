@@ -7,5 +7,10 @@ const paths = {
 } as const;
 
 export function WorkspaceIcon({ name }: { name: keyof typeof paths }) {
+  if (name === "lock") return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <path d="M5 10h14v11H5V10Zm7 4v3" /><path className="lock-shackle" d="M8 10V4h8v6" />
+    </svg>
+  );
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={paths[name]} /></svg>;
 }

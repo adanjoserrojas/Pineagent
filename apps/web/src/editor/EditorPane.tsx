@@ -208,9 +208,10 @@ export default function EditorPane({
                 readOnlyMessage: {
                   value: state.holder ? `${nameOf(state.holder)} is editing this file.` : "Not editable right now.",
                 },
-                fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-                fontSize: 13,
-                lineHeight: 22,
+                fontFamily: "'Recursive Mono', ui-monospace, monospace",
+                fontVariations: "'MONO' 1, 'CASL' 0.1, 'CRSV' 0",
+                fontSize: 14,
+                lineHeight: 23,
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
                 renderLineHighlight: "all",
