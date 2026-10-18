@@ -1,8 +1,12 @@
 {
-  "revision": "V8-python-language-2",
-  "approval": "Owner approved Python adapter for My_App with frozen routing policy and Crown preserved",
+  "revision": "V8-production-3",
+  "approval": "Owner requested feature building and production hardening on fix/harness-production; DAG candidates and routing thresholds retained",
   "baseManifestSha256": "e8f5d00e46e94be5cb0fd1691b52c63feb611089cb82528c6665888dc0a56fb8",
   "overrides": {
+    "src/master-tool-1.ts": {
+      "originalSha256": "f2a5b9cbdfae66a2f907fea97f2d2d18f8ad467c33a2f64828273e3874f370c2",
+      "integrationSha256": "fab1afb678d1dc2733fefae90335d03fa0f547e03ddc678c31d0f450dc90ad75"
+    },
     "src/types.ts": {
       "originalSha256": "13879d7bbf43aad072eca088f389160e27478e3c91bfe32535b66ee6d20ed2c6",
       "integrationSha256": "0d636a8d7af98bec8bb42ccc297aa0836820259b77c85208abc68782e6c35ae5"
@@ -17,12 +21,15 @@
     },
     "test/freeze-manifest.check.ts": {
       "originalSha256": "130c060ddbc42047ace5b9d5ae65d5eff1a5cebd1d0dcc758628ba4d23b78817",
-      "integrationSha256": "25eecdb977421207763eb8de3d2c89d7ae9b3911a264c87e9989c1ae919fae5a"
+      "integrationSha256": "72611a7bf420da6f47cf31019120183a7167ade0495eb8840e5a9fa9e776a7cf"
     }
   },
   "additions": {
     "test/backend-runtime.test.ts": "8c2aa62bd607838ba77bab486c98eb94ccba0fb81a188fc3be95e3eaf8b7e3db",
+    "test/router-validation.test.ts": "44d225644baad5ed80bb1819d71c7219f10bb29d6fc3b74df872a65714aa5ce1",
     "docs/INTEGRATION_REVISION_1.md": "ebed0562bb562ecbc5eb07a0e9439f5b0c610113e438b74edd09bee32c891477",
-    "docs/INTEGRATION_REVISION_2.md": "c98090641c325412f607efb3c2c610f08b204a97ddfdf0ef56a1cf3ee437e349"
+    "docs/INTEGRATION_REVISION_2.md": "c98090641c325412f607efb3c2c610f08b204a97ddfdf0ef56a1cf3ee437e349",
+    "docs/PRODUCTION_PLAN.md": "764be092ce3ed669c4345785db7788c7f7c693be1adf9947ffa28bf135f3a839",
+    "scripts/seal-production.mjs": "75cf8183af41349a06048391be259cba41a85a031761bbdf23cb952584375154"
   }
 }

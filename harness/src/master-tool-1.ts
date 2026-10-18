@@ -46,18 +46,24 @@ function normalizeProbabilities(probabilities: Probabilities | undefined, labels
   const entries = Array.isArray(probabilities)
     ? probabilities
     : Object.entries(probabilities ?? {}).map(([value, probability]) => ({ value, probability }));
+  const seen = new Set<string>();
   for (const item of entries) {
-    if (typeof item?.value === "string" && Object.hasOwn(labels, item.value)) {
-      const probability = Number(item.probability);
-      vector[item.value] = Number.isFinite(probability) ? probability : null;
-    }
+    if (typeof item?.value !== "string" || !Object.hasOwn(labels, item.value) || seen.has(item.value)
+      || typeof item.probability !== "number" || !Number.isFinite(item.probability)
+      || item.probability < 0 || item.probability > 1) return Object.fromEntries(Object.keys(labels).map(label => [label, null]));
+    seen.add(item.value);
+    vector[item.value] = item.probability;
   }
+  // Incomplete or unnormalised scores cannot authorize a write. Tolerate provider rounding.
+  if (seen.size !== Object.keys(labels).length || Math.abs(Object.values(vector).reduce<number>((sum, value) => sum + (value ?? 0), 0) - 1) > 0.01)
+    return Object.fromEntries(Object.keys(labels).map(label => [label, null]));
   return vector;
 }
 
-function probabilityMargin(vector: Record<string, number | null>): number | null {
+function probabilityMargin(vector: Record<string, number | null>, selected: string, confidence: number): number | null {
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1 || Object.values(vector).some(value => value === null)) return null;
   const values = Object.values(vector).filter((value): value is number => Number.isFinite(value)).sort((a, b) => b - a);
-  return values.length >= 2 ? values[0] - values[1] : null;
+  return values.length >= 2 && vector[selected] === values[0] ? values[0] - values[1] : null;
 }
 
 async function postJson<T>(url: string, body: unknown, apiKey: string | undefined, timeoutMs: number, fetchImpl: FetchLike): Promise<{ json: T; clientMs: number }> {
@@ -159,7 +165,8 @@ export class MasterTool1Router {
     const cacheKey = stableId({ mode: this.mode, secondaryMode: this.secondaryProvider?.mode, task, historyPriors, candidates: candidates.map((c) => c.id) });
     const cached = this.cache.get(cacheKey);
     if (cached && cached.expiresAt > this.now()) {
-      return { ...cached.value, routerMode: "cache", reasonCode: `${this.mode}-cache-hit`, routerCalls: 0 };
+      return { ...cached.value, taskId, routerMode: "cache", reasonCode: `${this.mode}-cache-hit`, routerCalls: 0,
+        routerMs: 0, usage: { inputTokens: 0, outputTokens: 0 } };
     }
 
     if (this.breakerState === "open") return this.useFallback({ taskId, task, candidates }, "breaker-open");
@@ -293,7 +300,7 @@ export class MasterTool1Router {
         candidateId: candidate.id,
         confidence: Number(answer!.confidence ?? 0),
         probabilities,
-        probabilityMargin: probabilityMargin(probabilities),
+        probabilityMargin: probabilityMargin(probabilities, answer!.choice!, Number(answer!.confidence ?? 0)),
         routerMs: Number(response.json.latency_ms ?? response.clientMs),
         usage: {
           inputTokens: response.json.usage?.input_tokens ?? null,
@@ -337,7 +344,7 @@ export class MasterTool1Router {
         candidateId: candidate.id,
         confidence: Number(answer!.confidence ?? 0),
         probabilities,
-        probabilityMargin: probabilityMargin(probabilities),
+        probabilityMargin: probabilityMargin(probabilities, answer!.choice!, Number(answer!.confidence ?? 0)),
         routerMs: response.clientMs,
         usage: {
           inputTokens: response.json.usage?.input_tokens ?? null,
