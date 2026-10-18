@@ -48,7 +48,7 @@ export type GatewayOptions = {
   log?: (event: string, fields?: Record<string, unknown>) => void;
 };
 
-type SocketData = { user: User; room?: string; openPath: string | null; budget: { tokens: number; at: number } };
+type SocketData = { user: User; room?: string; scope?: { wsId: string; branch: string }; openPath: string | null; budget: { tokens: number; at: number } };
 type GatewaySocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 
 // Abuse limits. A person typing produces ~10 events a second; anything far above that is a bug or worse.
@@ -198,9 +198,14 @@ export function createGateway(opts: GatewayOptions) {
     const { user } = socket.data;
     let terminalBusy = false;
     log("socket.connected", { user: user.id });
-    const joined = async () => {
+    const joined = async (writing = false) => {
       const id = socket.data.room;
       const r = id ? await existing(id)?.catch(() => null) : null;
+      if (!active(user) || !socket.connected) return null;
+      if (writing && r && opts.authorize) {
+        const scope = socket.data.scope;
+        if (!scope || await opts.authorize({ ...scope, roomId: r.id, user }).catch(() => "UNAVAILABLE") !== "ok") return null;
+      }
       return r ? { room: r.id, ...r } : null;
     };
 
@@ -240,6 +245,7 @@ export function createGateway(opts: GatewayOptions) {
       }
       if (socket.data.room && socket.data.room !== room) socket.leave(socket.data.room);
       socket.data.room = room;
+      socket.data.scope = { wsId, branch };
       await socket.join(room);
       const self: Member = { userId: user.id, name: user.name, avatarUrl: user.avatarUrl, openPath: socket.data.openPath };
       const files = await r.repo.listFiles();
@@ -273,7 +279,7 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("lock:acquire", async ({ path, kind }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       const target = kind === "dir" && typeof path === "string" && path.endsWith("/") ? path.slice(0, -1) : path;
       // Malformed requests get no ack; the client's timeout handles it.
       if (!j || (kind !== "file" && kind !== "dir") || !j.ws.resolvePath(target) || (kind === "dir" && !path.endsWith("/"))) return;
@@ -290,7 +296,7 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("lock:release", async ({ path }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       let released;
       try { released = await j?.ws.releaseSafely(path, user.id, () => active(user) && socket.connected); }
       catch { log("sandbox.fence_failed", { room: j?.room, operation: "release" }); socket.disconnect(true); return; }
@@ -305,7 +311,7 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("file:ops", async ({ path, baseVersion, ops }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       const sane =
         Array.isArray(ops) &&
         ops.length <= MAX_OPS_PER_BATCH &&
@@ -325,7 +331,7 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("tree:create", async ({ path, kind }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       if (!j || (kind !== "file" && kind !== "dir")) return ack({ ok: false, code: "INVALID" });
       const res = await j.ws.create(path, kind, user.id, () => active(user) && socket.connected)
         .catch(() => ({ ok: false as const, code: "INVALID" as const }));
@@ -337,7 +343,7 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("run:start", async ({ task }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       ack(j ? j.harness.start({ id: user.id, name: user.name }, task) : { ok: false, code: "BAD_REQUEST" });
     });
 
@@ -369,7 +375,7 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("git:commit", async ({ paths, message, push }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       const jobId = j?.queue.enqueue(authorOf(user), paths, message, push);
       if (jobId) log("git.enqueued", { room: j!.room, user: user.id, push: push === true });
       ack(jobId ? { ok: true, jobId } : { ok: false, code: "BAD_REQUEST" });
