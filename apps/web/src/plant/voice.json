@@ -1,5 +1,9 @@
 {
  "voice": "Kevin",
+ "elevenlabs": {
+  "voiceId": null,
+  "model": "eleven_multilingual_v2"
+ },
  "lines": {
   "planning": "Hmm, let me think.",
   "routing": "Picking the best plan!",
