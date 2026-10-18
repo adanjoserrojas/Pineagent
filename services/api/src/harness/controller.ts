@@ -17,7 +17,7 @@ type Model = {
 type Run = { view: RunView; abort: AbortController; work: Promise<void>; pause: boolean;
   choice?: string; hint?: string; rejected: number; candidates: DagCandidate[] };
 type Options = { context: HarnessContext; model(ownerId: string, runId: string): Model; router(ownerId: string, runId: string): Router;
-  runTests(ownerId: string, runId: string, path?: string | null, validator?: "node" | "python"): Promise<TestResult>;
+  runTests(ownerId: string, runId: string, path?: string | null, validator?: "node" | "python", signal?: AbortSignal): Promise<TestResult>;
   receipt?(runId: string, result: Record<string, unknown>): void };
 const terminal = (run: Run) => run.view.state === "done" || run.view.state === "error";
 const steps = (candidate: DagCandidate) => candidate.order.map(tool => ({ tool,
@@ -119,6 +119,8 @@ export class LiveHarness implements Harness {
     let providerAttempts = 0;
     let executorModelCalls = 0;
     let model: Model | undefined;
+    let scorer: Router | undefined;
+    const routingDecisions: RouteDecision[] = [];
     let observations: EvidenceVersions = new Map();
     let validator: "node" | "python" = "node";
     const boundary = async () => {
@@ -135,7 +137,7 @@ export class LiveHarness implements Harness {
     };
     const runtime = (allowedWrites: string[], outputLimit = 48_000) => new BackendTools({ ws: context.ws, ownerId, runId,
       allowedWrites, outputLimit, observations, validator, files: context.files, boundary,
-      changed: context.events.fileChanged, runTests: path => this.options.runTests(ownerId, runId, path, validator),
+      changed: context.events.fileChanged, runTests: path => this.options.runTests(ownerId, runId, path, validator, run.abort.signal),
       progress: event => {
         const i = run.view.steps.findIndex(step => step.tool === event.name);
         this.emit(run, { nodeIndex: i >= 0 ? i : run.view.nodeIndex });
@@ -143,7 +145,7 @@ export class LiveHarness implements Harness {
     try {
       const activeModel = this.options.model(ownerId, runId);
       model = activeModel;
-      const scorer = this.options.router(ownerId, runId);
+      scorer = this.options.router(ownerId, runId);
       planning: while (true) {
         await boundary();
         this.emit(run, { state: "planning" });
@@ -166,7 +168,8 @@ export class LiveHarness implements Harness {
             await boundary();
             const decision: RouteDecision = run.choice
               ? { status: "selected", candidateId: run.choice, reasonCode: "owner_approved", routerMode: run.view.routerMode ?? undefined }
-              : await scorer.route(input);
+              : await scorer!.route({ ...input, signal: run.abort.signal });
+            routingDecisions.push(decision);
             run.choice = undefined;
             run.abort.signal.throwIfAborted();
             const selected = run.candidates.find(c => c.id === decision.candidateId);
@@ -227,8 +230,11 @@ export class LiveHarness implements Harness {
       try { await this.release(run); }
       catch { this.emit(run, { state: "error", error: { nodeIndex: run.view.nodeIndex, message: "Sandbox revocation failed; locks retained. Operator intervention required." } }); }
       const ledger = model?.receipts?.();
+      const routerReceipts = scorer?.receipts?.();
       this.options.receipt?.(runId, { status: run.view.state, modelCalls: ledger?.length ?? providerAttempts, modelAttempts: providerAttempts, executorModelCalls,
         modelReceipts: ledger,
+        routerReceipts, routingDecisions,
+        totalProviderCalls: (ledger?.length ?? providerAttempts) + (routerReceipts?.length ?? routingDecisions.reduce((sum, decision) => sum + (decision.routerCalls ?? 0), 0)),
         routerMode: run.view.routerMode, codingRecovery: run.view.codingRecovery, wallMs: Date.now() - run.view.startedAt });
     }
   }

@@ -39,10 +39,12 @@ export interface RouteDecision {
   routeLabel?: string | null;
 }
 export interface RouteRequest {
+  signal?: AbortSignal;
   taskId?: string; task: string; candidates: DagCandidate[];
   oracleCandidateId?: string; historyPriors?: Record<string, number>;
 }
-export interface Router { route(input: RouteRequest): Promise<RouteDecision> }
+export interface RouterReceipt { provider: ProviderMode; status: "ok" | "failed"; usage: TokenUsage | null; wallMs: number }
+export interface Router { route(input: RouteRequest): Promise<RouteDecision>; receipts?(): RouterReceipt[] }
 export interface HttpResponse {
   ok: boolean; status?: number; headers: { get(name: string): string | null }; text(): Promise<string>;
 }

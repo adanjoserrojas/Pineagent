@@ -38,13 +38,14 @@ const EDIT_CONTRACT = ' For existing files you may return edits instead of full 
 export class OpusRun {
   private calls = 0;
   private busy = false;
+  private inputChars = 0;
   private readonly ledger: ModelReceipt[] = [];
   constructor(private readonly options: {
     runId: string; ownerId: string; transport: ModelTransport;
-    maxCalls?: number; timeoutMs?: number; maxOutputTokens?: number;
+    maxCalls?: number; timeoutMs?: number; maxOutputTokens?: number; maxInputChars?: number;
   }) {
     if (!options.runId || !options.ownerId) throw new Error("An authenticated run identity is required");
-    for (const [value, max] of [[options.maxCalls ?? 3, 8], [options.timeoutMs ?? 120_000, 180_000], [options.maxOutputTokens ?? 8192, 16384]]) {
+    for (const [value, max] of [[options.maxCalls ?? 3, 8], [options.timeoutMs ?? 120_000, 180_000], [options.maxOutputTokens ?? 8192, 16384], [options.maxInputChars ?? 180_000, 400_000]]) {
       if (!Number.isInteger(value) || value < 1 || value > max) throw new Error("Invalid model limit");
     }
   }
@@ -71,10 +72,13 @@ export class OpusRun {
   private async generate<T>(purpose: Purpose, input: object, signal: AbortSignal | undefined, validate: (value: unknown) => T): Promise<{ value: T; usage: Usage }> {
     const text = JSON.stringify(input);
     if (text.length > 100_000) throw new Error("Model input exceeds evidence budget");
+    const requestChars = text.length + SYSTEM[purpose].length + (purpose === "plan" ? 0 : EDIT_CONTRACT.length);
+    if (this.inputChars + requestChars > (this.options.maxInputChars ?? 180_000)) throw new Error("Run input budget exhausted");
     if (this.busy || this.calls >= (this.options.maxCalls ?? 3)) throw new Error("Run model-call budget exhausted or busy");
     signal?.throwIfAborted();
     this.busy = true;
     this.calls++;
+    this.inputChars += requestChars; // Failed attempts also consume the budget.
     const started = performance.now();
     const receipt: ModelReceipt = { runId: this.options.runId, ownerId: this.options.ownerId, purpose, model: OPUS_MODEL, status: "failed", usage: unknownUsage(), wallMs: 0 };
     const controller = new AbortController();

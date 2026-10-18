@@ -25,14 +25,29 @@ function isWithin(relative: string, allowedWrites: string[]): boolean {
   });
 }
 
-function runProcess(command: string, args: string[], options: SpawnOptionsWithoutStdio): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { ...options, windowsHide: true, shell: false });
+function runProcess(command: string, args: string[], options: SpawnOptionsWithoutStdio, timeoutMs: number, signal?: AbortSignal): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { ...options, windowsHide: true, shell: false, detached: process.platform !== "win32" });
     let stdout = "";
     let stderr = "";
-    child.stdout!.on("data", (chunk) => (stdout += chunk.toString()));
-    child.stderr!.on("data", (chunk) => (stderr += chunk.toString()));
-    child.on("close", (exitCode) => resolve({ exitCode, stdout, stderr }));
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      if (!child.pid) return;
+      if (process.platform === "win32") {
+        const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+        killer.on("error", () => child.kill());
+      } else { try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); } }
+    };
+    const timer = setTimeout(stop, timeoutMs);
+    signal?.addEventListener("abort", stop, { once: true });
+    const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", stop); };
+    child.stdout!.on("data", chunk => { stdout = (stdout + chunk.toString()).slice(-48_000); });
+    child.stderr!.on("data", chunk => { stderr = (stderr + chunk.toString()).slice(-48_000); });
+    child.on("error", error => { cleanup(); reject(error); });
+    child.on("close", exitCode => { cleanup(); if (stopped) reject(new Error("Verification cancelled or timed out")); else resolve({ exitCode, stdout, stderr }); });
   });
 }
 
@@ -45,8 +60,13 @@ export function taskTerms(task: string): string[] {
 }
 
 export class SandboxToolRuntime {
+  private readonly testTimeoutMs: number;
+  private readonly signal?: AbortSignal;
   declare root: string; declare allowedWrites: string[]; declare outputLimit: number; declare events: ToolEvent[];
-  constructor({ root, allowedWrites, outputLimit = 20_000 }: { root: string; allowedWrites: string[]; outputLimit?: number }) {
+  constructor({ root, allowedWrites, outputLimit = 20_000, testTimeoutMs = 120_000, signal }: { root: string; allowedWrites: string[]; outputLimit?: number; testTimeoutMs?: number; signal?: AbortSignal }) {
+    if (!Number.isInteger(testTimeoutMs) || testTimeoutMs < 1 || testTimeoutMs > 120_000) throw new Error("Invalid verification deadline");
+    this.testTimeoutMs = testTimeoutMs;
+    this.signal = signal;
     this.root = path.resolve(root);
     this.allowedWrites = allowedWrites;
     this.outputLimit = outputLimit;
@@ -168,7 +188,7 @@ export class SandboxToolRuntime {
     return this.record("run_tests", { testPath }, async () => {
       const args = ["--test"];
       if (testPath) args.push(this.resolve(testPath).absolute);
-      const result = await runProcess(process.execPath, args, { cwd: this.root, env: benchmarkEnvironment() });
+      const result = await runProcess(process.execPath, args, { cwd: this.root, env: benchmarkEnvironment() }, this.testTimeoutMs, this.signal);
       return {
         exitCode: result.exitCode,
         output: `${result.stdout}\n${result.stderr}`.slice(-this.outputLimit),

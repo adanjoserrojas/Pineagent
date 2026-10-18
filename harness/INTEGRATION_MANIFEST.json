@@ -9,15 +9,15 @@
     },
     "src/master-tool-1.ts": {
       "originalSha256": "f2a5b9cbdfae66a2f907fea97f2d2d18f8ad467c33a2f64828273e3874f370c2",
-      "integrationSha256": "fab1afb678d1dc2733fefae90335d03fa0f547e03ddc678c31d0f450dc90ad75"
+      "integrationSha256": "fbd283324e76e599cc39d0728a67dd95170a6f3dce92bf7922cf899cc7e44713"
     },
     "src/sandbox-tools.ts": {
       "originalSha256": "6495d039b9b615d7ab3bf1b2bb3a3518d9c402e67d4fc16b3f6b0467458b60a9",
-      "integrationSha256": "7beb40ff0280207c1b509fdd0b2b884aa3e9053783d9b0a21e3f87534d75f4f9"
+      "integrationSha256": "e7369720f3376429471892877206ba4a4b18a9325ede7da619e8fe4ec7db55d5"
     },
     "src/types.ts": {
       "originalSha256": "13879d7bbf43aad072eca088f389160e27478e3c91bfe32535b66ee6d20ed2c6",
-      "integrationSha256": "1a1999fdaeeae665606dbcc0ca6c141a7f576b5965e9ad523215931e7e147356"
+      "integrationSha256": "a951540c5cd6dc1fd84d79c38937f86b900939215906860d3d54101c10c2e768"
     },
     "src/v7-executor.ts": {
       "originalSha256": "8337297ca1386727e0d8e5bc246cce3974822eae979e5b624aab08c81b2b902f",
@@ -37,6 +37,7 @@
     "src/repository-language.ts": "080328ebb5911d95a363f0b71a09e0d2f24406f2dcdecc83121846d713accff4",
     "src/structured-patch.ts": "3821d47b7a0f6fe23ffa5f855fae01f9af7af4cac185b20e153706765ca9c1b2",
     "test/backend-runtime.test.ts": "8c2aa62bd607838ba77bab486c98eb94ccba0fb81a188fc3be95e3eaf8b7e3db",
+    "test/execution-limits.test.ts": "7695c56f582cc5312fb460a48d7114237d6048f796d933cb3e2c072eff745024",
     "test/production-evidence.test.ts": "fa18a7295d461d55e33100b0149d9c5e30995946cb4fcfb9b31c70fb3372cffc",
     "test/router-validation.test.ts": "44d225644baad5ed80bb1819d71c7219f10bb29d6fc3b74df872a65714aa5ce1",
     "test/structured-patch.test.ts": "cc3294ad2346754db5ab6b9ac5eebbcdfe51cd832fa48821402bf9b88260ee3a",
