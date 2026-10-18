@@ -2,9 +2,11 @@ import { useEffect, useSyncExternalStore } from "react";
 import { faceInfo } from "./VirtualPlant";
 import { plantSerial } from "./serial";
 
-// Connects the real plant robot over USB, under the on-screen one. The robot then mirrors every face.
+// Connects the real plant robot over USB, under the on-screen one. The robot then mirrors every face,
+// with a sound or an arm wave for the moments that matter (cues.ts).
 export function PlantConnect() {
   const status = useSyncExternalStore(plantSerial.subscribe, plantSerial.getStatus);
+  const prefs = useSyncExternalStore(plantSerial.subscribe, plantSerial.getPrefs);
   useEffect(() => void plantSerial.resume(), []);
 
   if (status.state === "unsupported") {
@@ -27,6 +29,16 @@ export function PlantConnect() {
       >
         {on ? "Disconnect" : "Connect robot"}
       </button>
+      {on && (
+        <div className="plant-link-controls">
+          <label><input type="checkbox" checked={prefs.sound} onChange={(e) => plantSerial.setPrefs({ sound: e.target.checked })} /> Sound</label>
+          <label><input type="checkbox" checked={prefs.arms} onChange={(e) => plantSerial.setPrefs({ arms: e.target.checked })} /> Arms</label>
+          <button type="button" className="link-btn" onClick={() => void plantSerial.test("done")}>Celebrate</button>
+        </div>
+      )}
+      {on && status.power === false && (
+        <p className="plant-link-note">No 5 V supply: the arms stay still and the piezo plays instead of the speaker.</p>
+      )}
       {note && <p className="plant-link-note" role="alert">{note}</p>}
     </div>
   );

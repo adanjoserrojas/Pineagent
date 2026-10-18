@@ -2,7 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { startMock } from "../../mock/server";
 
 // The real robot over Web Serial, with a fake robot standing in for navigator.serial: it answers
-// like PlantBotTest.ino (`PING` → `OK PONG …`, `STATE <face>` → `OK …`) and records every line.
+// like PlantBotTest.ino (`PING` → `OK PONG …`, `STATE <face>` → `OK …`, the 5 V supply plugged in)
+// and records every line.
 process.env.MOCK_AVATARS = "0";
 
 function fakeRobot() {
@@ -25,7 +26,12 @@ function fakeRobot() {
               const line = buf.slice(0, i);
               buf = buf.slice(i + 1);
               w.__robot.push(line);
-              const out = line === "PING" ? "OK PONG plantbot-test v1" : line.startsWith("STATE ") ? `OK ANIM ${line.slice(6)}` : "ERR Unknown";
+              const out =
+                line === "PING" ? "OK PONG plantbot-test v1"
+                : line.startsWith("STATE ") ? `OK ANIM ${line.slice(6)}`
+                : line === "SENSE" ? "OK SENSE mv=3100 power=yes"
+                : /^(MELODY|SERVO|PIEZO|TONE) /.test(line) ? `OK ${line} done`
+                : "ERR Unknown";
               setTimeout(() => toHost?.enqueue(enc.encode(`${out}\r\n`)), 5);
             }
           },
@@ -63,12 +69,20 @@ test("the robot mirrors the plant's faces, and comes back after an unplug", asyn
     await page.getByLabel("Ask your agent").fill("add a test for currentUser");
     await page.getByRole("button", { name: "Start run" }).click();
     await expect(page.getByTestId("run-state")).toHaveText("done");
-    await expect.poll(() => robot(page)).toContain("STATE done");
+    // Finishing celebrates: the melody, then the arms wave.
+    await expect.poll(() => robot(page)).toContain("SERVO WAVE");
     const sent = await robot(page);
-    const order = ["STATE planning", "STATE executing", "STATE done"].map((l) => sent.indexOf(l));
+    const order = ["STATE planning", "STATE executing", "STATE done", "MELODY 30", "SERVO WAVE"].map((l) => sent.indexOf(l));
     expect(order.every((i) => i > 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     await page.screenshot({ path: "test-results/plant-serial.png" });
+
+    // With Sound off, Celebrate only waves.
+    await panel(page).getByLabel("Sound").uncheck();
+    const before = (await robot(page)).length;
+    await panel(page).getByRole("button", { name: "Celebrate" }).click();
+    await expect.poll(async () => (await robot(page)).slice(before)).toEqual(["SENSE", "SERVO WAVE"]);
+    await panel(page).getByLabel("Sound").check();
 
     await page.evaluate(() => (window as unknown as { __unplug(): void }).__unplug());
     await expect(panel(page).getByRole("alert")).toContainText("Robot unplugged");

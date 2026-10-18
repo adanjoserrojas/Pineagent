@@ -1,5 +1,6 @@
 import type { FaceKey } from "../runs/runs";
 import { plantBridge, type PlantSink } from "./bridge";
+import { CUES } from "./cues";
 
 // The browser-to-robot link (LLD 9) over Web Serial, speaking the test firmware's line protocol:
 // one command per line, exactly one `OK …` or `ERR …` line back. Other lines (EVT …, CSI telemetry)
@@ -24,7 +25,11 @@ export type PlantSerialStatus =
   | { state: "unsupported" }
   | { state: "off"; note?: string }
   | { state: "connecting" }
-  | { state: "on"; face: FaceKey | null; problem?: string };
+  | { state: "on"; face: FaceKey | null; problem?: string; power: boolean | null }; // power: 5 V supply seen, null until asked
+
+// Sounds and arm moves can each be turned off (a quiet room, a robot without arms fitted).
+export type PlantPrefs = { sound: boolean; arms: boolean };
+const PREFS_KEY = "pineagent.robot";
 
 const ESPRESSIF = 0x303a; // the S3's native USB port, the one the firmware answers on
 const BAUD = 115200; // native USB ignores it, but open() needs one
@@ -47,6 +52,9 @@ export class PlantSerial {
   private wanted: FaceKey | null = null;
   private sent: FaceKey | null = null;
   private pumping = false;
+  private power: boolean | null = null;
+  private prefs: PlantPrefs = loadPrefs();
+  private testing = false;
 
   constructor(
     private readonly serial: SerialLike | undefined,
@@ -62,6 +70,24 @@ export class PlantSerial {
     return () => this.listeners.delete(fn);
   };
   getStatus = () => this.status;
+  getPrefs = () => this.prefs;
+
+  setPrefs(patch: Partial<PlantPrefs>) {
+    this.prefs = { ...this.prefs, ...patch };
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs)); } catch { /* storage blocked: still applies to this page */ }
+    this.listeners.forEach((fn) => fn());
+  }
+
+  // Plays a face's cue without changing the face, to check the speaker, piezo and arms.
+  async test(face: FaceKey = "done") {
+    if (!this.link || this.testing) return;
+    this.testing = true;
+    try {
+      await this.cue(face, this.wanted);
+    } finally {
+      this.testing = false;
+    }
+  }
 
   // Needs a click: Chrome only shows the port chooser from a user gesture.
   async connect() {
@@ -112,7 +138,8 @@ export class PlantSerial {
     }
     this.port = port;
     this.sent = null;
-    this.set({ state: "on", face: null });
+    this.power = null;
+    this.on(null);
     // Attaching hands over the current face at once, which is also the re-send after a replug.
     this.detach = this.bridge.attach({ show: (face) => this.show(face) });
   }
@@ -140,6 +167,7 @@ export class PlantSerial {
     try {
       while (this.link && this.wanted && this.wanted !== this.sent) {
         const face = this.wanted;
+        const first = this.sent === null; // what it was already showing when the robot connected: no fanfare
         let problem: string | undefined;
         try {
           await this.command(`STATE ${face}`);
@@ -148,28 +176,62 @@ export class PlantSerial {
           problem = `The robot couldn’t show “${face}”: ${(e as Error).message}`;
         }
         this.sent = face; // an ERR isn't retried; the next face change tries again
-        this.set({ state: "on", face, problem });
+        this.on(face, problem);
+        if (!first) await this.cue(face, face);
       }
     } finally {
       this.pumping = false;
     }
   }
 
+  // Plays the steps the user has left on. Stops early if the plant moves on from `during`, so the
+  // face isn't held back behind a celebration that no longer applies.
+  private async cue(face: FaceKey, during: FaceKey | null) {
+    const steps = (CUES[face] ?? []).filter((s) => this.prefs[s.kind]);
+    if (!steps.length) return;
+    if (steps.some((s) => s.power)) await this.sense();
+    for (const step of steps) {
+      if (!this.link || this.wanted !== during) return;
+      const cmd = step.power && this.power === false ? step.piezo : step.cmd;
+      if (!cmd) continue;
+      try {
+        await this.command(cmd, step.ms + this.opts.timeoutMs);
+      } catch (e) {
+        if (!this.link) return;
+        this.on(this.sent, `The robot couldn’t do “${cmd}”: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  // Asks the firmware whether the 5 V supply is in. It can be plugged in or out at any time.
+  private async sense() {
+    try {
+      this.power = /power=yes/.test(await this.command("SENSE"));
+    } catch {
+      this.power = null;
+    }
+    if (this.status.state === "on") this.on(this.status.face, this.status.problem);
+  }
+
+  private on(face: FaceKey | null, problem?: string) {
+    this.set({ state: "on", face, problem, power: this.power });
+  }
+
   // One command in flight at a time, so each answer belongs to the command before it.
-  private command(line: string): Promise<string> {
-    const run = this.chain.then(() => this.exchange(line));
+  private command(line: string, timeoutMs = this.opts.timeoutMs): Promise<string> {
+    const run = this.chain.then(() => this.exchange(line, timeoutMs));
     this.chain = run.catch(() => {});
     return run;
   }
 
-  private exchange(line: string): Promise<string> {
+  private exchange(line: string, timeoutMs: number): Promise<string> {
     const link = this.link;
     if (!link) return Promise.reject(new Error("not connected"));
     return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending = null;
         reject(new Error("no answer"));
-      }, this.opts.timeoutMs);
+      }, timeoutMs);
       this.pending = { resolve, reject, timer };
       link.writer.write(new TextEncoder().encode(`${line}\n`)).catch(() => {});
     });
@@ -242,6 +304,15 @@ export class PlantSerial {
   private set(status: PlantSerialStatus) {
     this.status = status;
     this.listeners.forEach((fn) => fn());
+  }
+}
+
+function loadPrefs(): PlantPrefs {
+  const prefs = { sound: true, arms: true };
+  try {
+    return { ...prefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
+  } catch {
+    return prefs;
   }
 }
 

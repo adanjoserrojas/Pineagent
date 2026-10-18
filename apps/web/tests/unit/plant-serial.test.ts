@@ -7,7 +7,9 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 // A robot on a USB cable: answers each line the way PlantBotTest.ino does, unless `reply` says otherwise.
-function robot(reply: (line: string) => string | null = firmware) {
+// A reply can be delayed, the way the firmware only answers SERVO WAVE once the arms are back.
+type Reply = string | null | [string, number];
+function robot(reply: (line: string) => Reply = firmware) {
   const got: string[] = [];
   let toHost!: ReadableStreamDefaultController<Uint8Array>;
   let buf = "";
@@ -23,7 +25,11 @@ function robot(reply: (line: string) => string | null = firmware) {
           buf = buf.slice(i + 1);
           got.push(line);
           const out = reply(line);
-          if (out !== null) queueMicrotask(() => toHost.enqueue(enc.encode(`${out}\r\n`)));
+          if (out === null) continue;
+          const [text, delay] = Array.isArray(out) ? out : [out, 0];
+          const send = () => toHost.enqueue(enc.encode(`${text}\r\n`));
+          if (delay) setTimeout(send, delay);
+          else queueMicrotask(send);
         }
       },
     }),
@@ -51,11 +57,17 @@ function robot(reply: (line: string) => string | null = firmware) {
   };
 }
 
-function firmware(line: string) {
+function firmware(line: string, power = true): Reply {
   if (line === "PING") return "OK PONG plantbot-test v1";
   if (line.startsWith("STATE ")) return `OK ANIM ${line.slice(6)} playing`;
+  if (line === "SENSE") return `OK SENSE mv=${power ? 3100 : 40} power=${power ? "yes" : "no"}`;
+  if (/^(MELODY|TONE|SERVO) /.test(line) && !power) return "ERR Servos needs the 5 V brick plugged in (SENSE reads low).";
+  if (line === "SERVO WAVE") return ["OK SERVO wave done", 120]; // longer than the 50 ms base timeout
+  if (line.startsWith("MELODY ")) return ["OK MELODY done", 40];
+  if (/^(MELODY|TONE|PIEZO) /.test(line)) return `OK ${line.split(" ")[0]} done`;
   return "ERR Unknown command";
 }
+const unpowered = (line: string) => firmware(line, false);
 
 function browser(port: SerialPortLike, granted: SerialPortLike[] = []) {
   const serial = Object.assign(new EventTarget(), {
@@ -88,7 +100,7 @@ describe("plant over Web Serial", () => {
     await until(() => face(plant) === "planning");
     expect(bot.got[0]).toBe("PING");
     expect(bot.faces()).toEqual(["planning"]);
-    expect(plant.getStatus()).toEqual({ state: "on", face: "planning", problem: undefined });
+    expect(plant.getStatus()).toEqual({ state: "on", face: "planning", problem: undefined, power: null });
 
     bridge.update("executing");
     await until(() => face(plant) === "executing");
@@ -176,5 +188,86 @@ describe("plant over Web Serial", () => {
     const plant = new PlantSerial(browser(bot.port).serial, new PlantBridge(), OPTS);
     await plant.connect();
     expect(plant.getStatus()).toMatchObject({ state: "off", note: expect.stringContaining("busy") });
+  });
+});
+
+describe("robot cues", () => {
+  // Connects, lets the first face go out (it never gets a cue), and returns what's sent from then on.
+  async function connected(reply?: (line: string) => Reply) {
+    const bot = robot(reply);
+    const bridge = new PlantBridge();
+    const plant = new PlantSerial(browser(bot.port).serial, bridge, OPTS);
+    plant.setPrefs({ sound: true, arms: true });
+    await plant.connect();
+    await until(() => face(plant) === "idle");
+    const from = bot.got.length;
+    return { bot, bridge, plant, after: () => bot.got.slice(from) };
+  }
+
+  it("a finished run plays the melody and waves the arms, after the face", async () => {
+    const { bridge, after } = await connected();
+    bridge.update("done");
+    await until(() => after().includes("SERVO WAVE"));
+    await new Promise((r) => setTimeout(r, 150)); // the wave answers late; it must not time out
+    expect(after()).toEqual(["STATE done", "SENSE", "MELODY 30", "SERVO WAVE"]);
+  });
+
+  it("connecting while the plant already shows done doesn't celebrate", async () => {
+    const bot = robot();
+    const bridge = new PlantBridge();
+    bridge.update("done");
+    const plant = new PlantSerial(browser(bot.port).serial, bridge, OPTS);
+    await plant.connect();
+    await until(() => face(plant) === "done");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(bot.got).toEqual(["PING", "STATE done"]);
+  });
+
+  it("without the 5 V supply the piezo plays instead and the arms stay still", async () => {
+    const { bridge, plant, after } = await connected(unpowered);
+    bridge.update("done");
+    await until(() => after().includes("PIEZO CHIRP"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(after()).toEqual(["STATE done", "SENSE", "PIEZO CHIRP"]);
+    expect(plant.getStatus()).toMatchObject({ state: "on", power: false, problem: undefined });
+  });
+
+  it("asking for approval chirps the piezo, which works on USB power alone", async () => {
+    const { bridge, after } = await connected();
+    bridge.update("awaiting_approval");
+    await until(() => after().includes("PIEZO CHIRP"));
+    expect(after()).toEqual(["STATE awaiting_approval", "PIEZO CHIRP"]);
+  });
+
+  it("sound and arms can each be turned off", async () => {
+    const { bridge, plant, after } = await connected();
+    plant.setPrefs({ sound: false });
+    bridge.update("done");
+    await until(() => after().includes("SERVO WAVE"));
+    await new Promise((r) => setTimeout(r, 150)); // the wave finishes
+    plant.setPrefs({ sound: true, arms: false });
+    bridge.update("idle");
+    await until(() => face(plant) === "idle");
+    bridge.update("done");
+    await until(() => after().filter((l) => l === "MELODY 30").length === 1);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(after()).toEqual(["STATE done", "SENSE", "SERVO WAVE", "STATE idle", "STATE done", "SENSE", "MELODY 30"]);
+  });
+
+  it("a new face cuts the rest of a celebration short", async () => {
+    const { bridge, after } = await connected();
+    bridge.update("done");
+    await until(() => after().includes("MELODY 30"));
+    bridge.update("planning"); // a new run starts while the melody plays
+    await until(() => after().includes("STATE planning"));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(after()).toEqual(["STATE done", "SENSE", "MELODY 30", "STATE planning"]);
+  });
+
+  it("Celebrate plays the done cue without changing the face", async () => {
+    const { plant, after } = await connected();
+    await plant.test("done");
+    expect(after()).toEqual(["SENSE", "MELODY 30", "SERVO WAVE"]);
+    expect(face(plant)).toBe("idle");
   });
 });

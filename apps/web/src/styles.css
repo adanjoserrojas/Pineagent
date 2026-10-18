@@ -261,6 +261,9 @@ button { font: inherit; }
 .plant-title { color: var(--text); font-weight: 500; }
 .plant-link { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; margin: -2px 0 0; font-size: 12px; color: var(--muted); }
 .plant-link[data-robot="on"] > span { color: var(--text); }
+.plant-link-controls { flex-basis: 100%; display: flex; align-items: center; gap: 12px; }
+.plant-link-controls label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.plant-link-controls .link-btn { margin-left: auto; }
 .plant-link-note { flex-basis: 100%; margin: 0; font-size: 11px; line-height: 16px; color: #7f9187; }
 
 /* Light motion after the Rive loops in all-states-motion.gif; off for reduced motion. */
