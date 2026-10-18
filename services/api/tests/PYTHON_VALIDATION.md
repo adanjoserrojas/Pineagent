@@ -101,3 +101,38 @@ mock tests cannot establish physical-device safety or reliability.
 The signed-in production browser identifies `4dandev` and reports no access to
 Pineagent. An authorized GitHub collaborator session for My_App is required for
 the live authenticated provider test; authorization will not be bypassed.
+
+## Integrated deployment result
+
+Release `66c94dd77804` was deployed to `pineagent.us` in account `004575106238`,
+`us-east-2`, on instance `i-09aa740830e8ae1d1`. SSM installation
+`7bc2de09-361c-4556-99db-128adee8c3c1` completed successfully (response code 0).
+The installer checked expected previous release `f9c7f0d9de20`, both artifact
+hashes, portable image configuration ID, API health and private supervisor IPC.
+No rollback was needed; the prior release and installation snapshots remain at
+`/opt/pineagent/releases/f9c7f0d9de20` and `/opt/pineagent/pty-stage.3vpGaF`.
+
+- Release archive SHA256: `0a7b03d871577aff792e2b4438de42eb7aac829b65f5415ff714546e7898d6f6`.
+- Image archive SHA256: `de0107a395e6fee6c3317aa7a179f20648b46176e9c76deda6a2cf618e80b125`.
+- Image configuration: `sha256:cd6a74e286ec5ad483d7855f5a57a582f08a288a92dc1bca7796abdc32ba602e`.
+- Live health: correct release SHA, `harness`, `terminal`, `interactiveTerminal`
+  true, store errors zero. The preserved `/voice/done.pcm` asset returns HTTP 200.
+- Runtime verification SSM `5e599730-e20e-4038-8e3d-cf7b72eafea7`: success/code 0.
+  Both services active, supervisor enabled, relay directory mode 0700, private
+  control socket 0600. API user 993 is not a Docker-group member. The exact deployed
+  image launches Flask 3.1.3/pytest 9.1.1 and the original Rust CLI as UID 993 with
+  no network, read-only root, dropped capabilities and bounded resources.
+- API startup successfully loads configured router secrets using the instance
+  role; this does not prove a successful Decisions/Jev scoring request.
+
+The refreshed production browser is signed in as `4dandev`; opening the explicitly
+authorized My_App repository reports **No access to this repository**. Therefore
+the live authenticated Ratatui/My_App/Opus/scorer run remains unverified. The owner
+must grant that account collaborator/write access to `adanjoserrojas/My_App` or
+sign in as an authorized account, then retry. No auth bypass, live coding run,
+approval override, GitHub push or hardware flash was performed.
+
+Reviewers: project owner / SE1 for deployment and Python integration; SE2 and the
+hardware owner for the recorded incoming USB recovery risks. Local branch commits
+remain unpushed for owner review. This deployment is not a claim of production
+readiness or a new inference/accuracy benchmark.
