@@ -24,9 +24,15 @@ variable "data_volume_gb" {
 }
 
 variable "domain_name" {
-  description = "Public hostname for HTTPS, e.g. api.example.com. Point its DNS A record at the public_ip output. Empty = no HTTPS yet (phase 1)."
+  description = "Public hostname for HTTPS, e.g. example.com. Point its DNS A record at the public_ip output. Empty = no HTTPS yet (phase 1)."
   type        = string
   default     = ""
+}
+
+variable "redirect_domains" {
+  description = "Other hostnames (e.g. www.example.com) that redirect to domain_name. Each needs its own A record at the public_ip output."
+  type        = list(string)
+  default     = []
 }
 
 variable "budget_email" {

@@ -14,7 +14,7 @@ output "shell" {
 }
 
 output "public_ip" {
-  description = "Add an A record for domain_name pointing here."
+  description = "Add an A record for domain_name (and each redirect_domains name) pointing here."
   value       = local.https ? aws_eip.api[0].public_ip : null
 }
 
