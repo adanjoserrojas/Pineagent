@@ -73,6 +73,22 @@ bool needPower(const char *what) {
   return false;
 }
 
+// ---------- speech (SAY) ----------
+const long SAY_MAX_BYTES = 10L * SAMPLE_RATE * 2;  // 10 s
+const size_t SAY_CHUNK = 512;                      // under the 1 KB USB receive buffer, with room for the line
+uint8_t *sayBuf = nullptr;
+size_t sayLen = 0, sayGot = 0;
+void sayReset() { free(sayBuf); sayBuf = nullptr; sayLen = sayGot = 0; }
+
+// Throws input away until the line goes quiet, so audio from a refused SAY isn't parsed as commands.
+void drainInput() {
+  uint32_t last = millis();
+  while (millis() - last < 150) {
+    if (Serial.available()) { Serial.read(); last = millis(); }
+    else delay(1);
+  }
+}
+
 String hexColorName(uint16_t c) { char b[8]; snprintf(b, sizeof b, "0x%04X", c); return String(b); }
 uint16_t rgb565(int r, int g, int b) { return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3); }
 
@@ -337,6 +353,52 @@ void handle(String cmd) {
     ledcWriteTone(PIN_PIEZO, 0); ledcDetach(PIN_PIEZO);
     pinMode(PIN_PIEZO, OUTPUT); digitalWrite(PIN_PIEZO, LOW);
     ok("PIEZO done"); return;
+  }
+
+  // Speech from the web app (lines recorded with Polly): 16-bit little-endian mono PCM at SAMPLE_RATE,
+  // sent in chunks small enough for the USB receive buffer, which drops bytes when it overflows.
+  //   SAY 0          reports support, the rate and the chunk size
+  //   SAY n          opens an n-byte buffer in PSRAM (refused without the 5 V supply)
+  //   SAYD k         k raw bytes (k <= SAY_CHUNK) follow the line; they are always read, even when refusing
+  //   SAY PLAY       plays the buffer on the I2S amp and frees it;  SAY STOP frees it
+  if (w[0] == "SAY") {
+    if (w[1] == "PLAY") {
+      if (!sayBuf || sayGot != sayLen) { err("SAY PLAY needs a full buffer: got " + String(sayGot) + " of " + String(sayLen) + " bytes"); return; }
+      if (!needPower("The amp")) { sayReset(); return; }
+      if (!audioBegin()) { sayReset(); err("I2S failed to start"); return; }
+      uint32_t t0 = millis();
+      const int16_t *pcm = (const int16_t *)sayBuf;
+      size_t frames = sayLen / 2;
+      int16_t out[512];
+      for (size_t i = 0; i < frames;) {
+        int k = 0;
+        for (; k < 256 && i < frames; k++, i++) out[2 * k] = out[2 * k + 1] = pcm[i];
+        i2s.write((uint8_t *)out, k * 4);
+      }
+      memset(out, 0, sizeof out);
+      i2s.write((uint8_t *)out, sizeof out); // flush with silence
+      sayReset();
+      ok("SAY played " + String(frames * 1000 / SAMPLE_RATE) + " ms in " + String(millis() - t0) + " ms"); return;
+    }
+    if (w[1] == "STOP") { sayReset(); ok("SAY stopped"); return; }
+    long n = w[1].toInt();
+    if (n == 0) { ok("SAY ready rate=" + String(SAMPLE_RATE) + " chunk=" + String(SAY_CHUNK)); return; }
+    sayReset();
+    if (n < 0 || n > SAY_MAX_BYTES || (n & 1)) { err("SAY needs an even byte count up to " + String(SAY_MAX_BYTES)); return; }
+    if (!needPower("The amp")) return;
+    sayBuf = (uint8_t *)ps_malloc(n);
+    if (!sayBuf) { err("Could not allocate the speech buffer in PSRAM"); return; }
+    sayLen = n;
+    ok("SAY open " + String(n)); return;
+  }
+  if (w[0] == "SAYD") {
+    long k = w[1].toInt();
+    if (k <= 0 || k > (long)SAY_CHUNK) { drainInput(); sayReset(); err("SAYD needs 1 to " + String(SAY_CHUNK) + " bytes"); return; }
+    if (!sayBuf || sayGot + k > sayLen) { drainInput(); sayReset(); err("SAYD without room: send SAY n first"); return; }
+    size_t got = Serial.readBytes((char *)sayBuf + sayGot, k);
+    if (got != (size_t)k) { drainInput(); sayReset(); err("SAYD got " + String(got) + " of " + String(k) + " bytes"); return; }
+    sayGot += k;
+    ok("SAYD " + String(sayGot)); return;
   }
 
   if (w[0] == "HELP") {

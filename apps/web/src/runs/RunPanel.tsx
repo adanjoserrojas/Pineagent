@@ -2,6 +2,7 @@ import { DEV_TOOLS } from "../devtools";
 import { useId, useState, type FormEvent } from "react";
 import type { Member, RouterMode, RunActionAck, RunState, RunView } from "../contracts/socket";
 import type { WorkspaceSocket } from "../net/socket";
+import { PlantConnect } from "../plant/PlantConnect";
 import { faceInfo, VirtualPlant } from "../plant/VirtualPlant";
 import { Avatar } from "../ui/Avatar";
 import { faceFor, type PlantView } from "./runs";
@@ -82,6 +83,7 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
       <div className="agent-heading"><h2 className="section-label">Agents</h2><span title={branch}>on {branch}</span></div>
 
       <VirtualPlant face={plant.face} caption={plantCaption} />
+      <PlantConnect />
       <div className="run-feed">
         {shown.length === 0 ? (
           <p className="run-empty">No runs yet. Give your agent a focused task to get growing.</p>

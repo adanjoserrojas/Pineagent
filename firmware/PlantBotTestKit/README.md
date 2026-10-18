@@ -84,6 +84,7 @@ You can type these in the log box. Each command gets exactly one `OK …` or `ER
 | `SERVO L/R/BOTH deg`, `SERVO SWEEP/WAVE/OFF` | arms, clamped 20–160° |
 | `TONE hz ms vol`, `SWEEP vol`, `MELODY vol`, `PSRAMAUDIO` | I2S speaker; vol is a % |
 | `PIEZO hz ms`, `PIEZO CHIRP` | piezo via LEDC |
+| `SAY 0`, `SAY n`, `SAYD k` + k bytes, `SAY PLAY/STOP` | speech from the web app: 16-bit mono PCM at 24 kHz, sent in chunks of up to 512 bytes into a PSRAM buffer, then played |
 
 ## Pin map (same as the wiring map)
 

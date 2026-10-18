@@ -1,0 +1,24 @@
+{
+ "voice": "Kevin",
+ "elevenlabs": {
+  "voiceId": "cgSgspJ2msm6clMCkdW9",
+  "model": "eleven_multilingual_v2",
+  "name": "Jessica"
+ },
+ "lines": {
+  "planning": "Hmm, let me think.",
+  "routing": "Picking the best plan!",
+  "routing_cache": "Ooh, I remember this one!",
+  "routing_llm": "Let me ask my big brain.",
+  "executing": "Okay, getting to work!",
+  "awaiting_approval": "Psst! Can you pick one for me?",
+  "blocked": "Someone's using that file. I'll wait.",
+  "paused": "Taking a little break.",
+  "error": "Uh oh. Something went wrong.",
+  "done": "Yay! All done!",
+  "disconnected": "Hello? Where did everybody go?",
+  "reconnecting": "Hang on, I'm reconnecting!",
+  "team_join": "Ooh, a new friend!",
+  "team_leave": "Bye bye! See you soon!"
+ }
+}
