@@ -14,15 +14,17 @@ function importsOf(file: string, content: string, available: Set<string>): strin
   return found;
 }
 
-export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fallbackAgent, history, adaptive = true, afterPatch = null, chooseExpansion = null }: DagExecutionOptions): Promise<ExecutionResult> {
+export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fallbackAgent, history, adaptive = true, afterPatch = null, chooseExpansion = null, runtimeFactory }: DagExecutionOptions): Promise<ExecutionResult> {
   const started = performance.now();
-  const runtime = new SandboxToolRuntime({ root: trialRoot, allowedWrites: task.allowedWrites, outputLimit: 48000 });
+  const injectedRuntime = runtimeFactory?.({ root: trialRoot, allowedWrites: task.allowedWrites, outputLimit: 48000 });
+  const runtime = injectedRuntime ?? new SandboxToolRuntime({ root: trialRoot, allowedWrites: task.allowedWrites, outputLimit: 48000 });
+  const readText = (file: string) => injectedRuntime ? injectedRuntime.readText(file) : fs.readFile(path.join(trialRoot, file), "utf8");
   const allFiles = await runtime.listFiles(), available = new Set(allFiles);
   const ranked = await runtime.searchCode(task.prompt);
   const graph = new Map<string, string[]>();
   const contents = new Map<string, string>();
   for (const file of allFiles.filter(f => /\.[cm]?js$/.test(f))) {
-    const content = await fs.readFile(path.join(trialRoot, file), "utf8");
+    const content = await readText(file);
     contents.set(file, content);
     graph.set(file, importsOf(file, content, available));
   }
@@ -118,7 +120,7 @@ export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fal
   const initialVerification = fullTest;
   if (fullTest.exitCode !== 0 && fallbackAgent) {
     const current = [];
-    for (const changed of patch.files) current.push(`CURRENT FILE ${changed.path}\n${await fs.readFile(path.join(trialRoot, changed.path), "utf8")}`);
+    for (const changed of patch.files) current.push(`CURRENT FILE ${changed.path}\n${await readText(changed.path)}`);
     const packet = ["The earlier FILE sections are pre-patch snapshots. Current changed files follow. Continue from the current working tree.", evidence,
       ...current, `Visible verification failed:\n${fullTest.output.slice(-5000)}`].join("\n\n");
     fallback = await fallbackAgent({ trialRoot, task, evidencePacket: packet });

@@ -15,15 +15,30 @@ interface FreezeManifest {
   normalizedLfSha256: Record<string, string>;
 }
 const manifest = JSON.parse(await fs.readFile(path.join(root, "FREEZE_MANIFEST.json"), "utf8")) as FreezeManifest;
+const integration = JSON.parse(await fs.readFile(path.join(root, "INTEGRATION_MANIFEST.json"), "utf8")) as {
+  baseManifestSha256: string;
+  overrides: Record<string, { originalSha256: string; integrationSha256: string }>;
+  additions: Record<string, string>;
+};
+const hash = (text: string) => createHash("sha256").update(text.replaceAll("\r\n", "\n")).digest("hex");
 
-test("freeze manifest seals every runtime source and the recorded transfer artifacts", async () => {
+test("original freeze and explicitly approved integration overrides seal the runtime", async () => {
+  assert.equal(hash(await fs.readFile(path.join(root, "FREEZE_MANIFEST.json"), "utf8")), integration.baseManifestSha256);
+  assert.deepEqual(Object.keys(integration.overrides).sort(), ["src/types.ts", "src/v7-executor.ts", "src/v8-executor.ts", "test/freeze-manifest.check.ts"]);
   const runtimeFiles = (await fs.readdir(path.join(root, "src"))).filter(file => file.endsWith(".ts")).map(file => `src/${file}`).sort();
   assert.deepEqual(Object.keys(manifest.normalizedLfSha256).filter(file => file.startsWith("src/")).sort(), runtimeFiles);
   for (const [file, expected] of Object.entries(manifest.normalizedLfSha256)) {
     const target = path.resolve(root, file);
     assert.ok(target.startsWith(`${path.resolve(root)}${path.sep}`), "manifest path must stay inside the package");
     const normalized = (await fs.readFile(target, "utf8")).replaceAll("\r\n", "\n");
-    assert.equal(createHash("sha256").update(normalized).digest("hex"), expected, `frozen file changed: ${file}`);
+    const override = integration.overrides[file];
+    if (override) assert.equal(override.originalSha256, expected, `original provenance changed: ${file}`);
+    assert.equal(hash(normalized), override?.integrationSha256 ?? expected, `unrecorded file change: ${file}`);
+  }
+  for (const [file, expected] of Object.entries(integration.additions)) {
+    const target = path.resolve(root, file);
+    assert.ok(target.startsWith(`${path.resolve(root)}${path.sep}`));
+    assert.equal(hash(await fs.readFile(target, "utf8")), expected, `integration artifact changed: ${file}`);
   }
 });
 

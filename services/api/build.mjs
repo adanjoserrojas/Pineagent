@@ -16,3 +16,9 @@ await build({
   logLevel: "warning",
 });
 console.log("built dist/server.mjs");
+await build({
+  entryPoints: ["src/sandbox/supervisor.ts"], outfile: "dist/supervisor.mjs",
+  bundle: true, platform: "node", target: "node22", format: "esm", sourcemap: true,
+  logLevel: "warning",
+});
+console.log("built dist/supervisor.mjs (separate privileged service; not deployed)");

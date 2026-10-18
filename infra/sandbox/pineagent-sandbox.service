@@ -1,0 +1,26 @@
+[Unit]
+Description=Pineagent restricted sandbox supervisor
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+RuntimeDirectory=pineagent-sandbox
+RuntimeDirectoryMode=0711
+EnvironmentFile=/etc/pineagent/sandbox.env
+ExecStart=/usr/bin/node /opt/pineagent/current/api/supervisor.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=35
+UMask=0177
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/run/pineagent-sandbox
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

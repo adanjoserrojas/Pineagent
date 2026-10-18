@@ -1,5 +1,10 @@
 // One branch's shared state: its files, their versions, and the lock table.
 // No sockets here, so the rules can be unit-tested with a fake clock.
+import { readFile, realpath, stat, lstat, readdir, open as openFile, rename, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { resolve, sep, relative, join } from "node:path";
+import type { Lock, LockChangeReason, Op } from "../contracts";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import type { Lock, LockChangeReason, Op, TreeCreateAck } from "../contracts";
@@ -56,6 +61,69 @@ export class Workspace {
   private readonly saves = new Map<string, Promise<void>>();
   // Versions from before a restart, used when a file is next loaded.
   private readonly restoredVersions = new Map<string, number>();
+  private writeFence: ((path: string) => Promise<void>) | undefined;
+  private leaseFence: (() => Promise<void>) | undefined;
+  private changingLease = false;
+  private freezeTail: Promise<void> = Promise.resolve();
+
+  // The sandbox host stops overlapping kernel writers before a backend edit.
+  setWriteFence(fence: (path: string) => Promise<void>): void { this.writeFence = fence; }
+
+  // Must stop and verify all writable containers for this room. A failed stop
+  // leaves the old ownership intact; no new owner may inherit live file handles.
+  setLeaseFence(fence: () => Promise<void>): void { this.leaseFence = fence; }
+
+  private assertFenced(): void {
+    if (this.leaseFence && !this.changingLease) throw new Error("Use fenced lock transitions with sandbox protection");
+  }
+
+  private async changeLease<T>(change: () => T): Promise<T> {
+    const release = await this.freeze("all");
+    try {
+      this.changingLease = true;
+      return change();
+    } finally { this.changingLease = false; release(); }
+  }
+
+  async acquireSafely(path: string, kind: Lock["kind"], userId: string): Promise<AcquireResult> {
+    const held = this.conflict(path, kind, userId);
+    if (held) return { ok: false, code: "HELD", lock: publicLock(held) };
+    const existing = this.locks.get(path);
+    if (existing && !this.expiryReason(existing)) {
+      existing.expiresAt = this.now() + this.timing.leaseMs;
+      return { ok: true, lock: publicLock(existing), created: false };
+    }
+    return this.changeLease(() => this.acquire(path, kind, userId));
+  }
+
+  releaseSafely(path: string, userId: string): Promise<Lock | null> {
+    const lock = this.locks.get(path);
+    if (!lock || lock.holder !== userId || lock.holderType !== "user") return Promise.resolve(null);
+    return this.changeLease(() => this.release(path, userId));
+  }
+
+  async sweepSafely(): Promise<{ lock: Lock; reason: LockChangeReason }[]> {
+    if (![...this.locks.values()].some((l) => this.expiryReason(l))) return [];
+    return this.changeLease(() => this.sweep());
+  }
+
+  acquireRunSafely(paths: string[], ownerId: string, runId: string) {
+    for (const path of paths) {
+      const held = [...this.locks.values()].find((l) => !(l.runId === runId && l.holder === ownerId)
+        && (l.path === path || (l.kind === "dir" && path.startsWith(l.path))));
+      if (held) return Promise.resolve({ ok: false as const, lock: publicLock(held) });
+    }
+    return this.changeLease(() => this.acquireForRun(paths, ownerId, runId));
+  }
+
+  releaseRunSafely(runId: string): Promise<Lock[]> {
+    if (![...this.locks.values()].some((l) => l.runId === runId)) return Promise.resolve([]);
+    return this.changeLease(() => this.releaseRun(runId));
+  }
+
+  private expiryReason(l: HeldLock): "expired" | "idle" | null {
+    return l.expiresAt <= this.now() ? "expired" : l.holderType === "user" && this.now() - l.lastEditAt >= this.timing.idleMs ? "idle" : null;
+  }
 
   constructor(
     readonly root: string,
@@ -132,6 +200,7 @@ export class Workspace {
   }
 
   acquire(path: string, kind: Lock["kind"], userId: string): AcquireResult {
+    this.assertFenced();
     const target = kind === "dir" && path.endsWith("/") ? path.slice(0, -1) : path;
     if (!this.resolvePath(target) || (kind === "dir" && !path.endsWith("/"))) throw new Error("Noncanonical workspace path");
     const held = this.conflict(path, kind, userId);
@@ -149,6 +218,7 @@ export class Workspace {
   }
 
   release(path: string, userId: string): Lock | null {
+    this.assertFenced();
     const lock = this.locks.get(path);
     if (!lock || lock.holder !== userId || lock.holderType !== "user") return null;
     this.locks.delete(path);
@@ -159,7 +229,7 @@ export class Workspace {
   // Renews every lease the user holds and reports the ones that expired since the last beat.
   heartbeat(userId: string): string[] {
     const expiresAt = this.now() + this.timing.leaseMs;
-    for (const l of this.locks.values()) if (l.holder === userId && l.holderType === "user") l.expiresAt = expiresAt;
+    for (const l of this.locks.values()) if (l.holder === userId && l.holderType === "user" && !this.expiryReason(l)) l.expiresAt = expiresAt;
     const expired = this.expiredFor.get(userId) ?? [];
     this.expiredFor.delete(userId);
     return expired;
@@ -168,10 +238,10 @@ export class Workspace {
   // Drops leases past expiry (no heartbeat) or idle too long (no edits). Agent run leases are
   // kept alive by the harness, which the mock doesn't have, so they only expire.
   sweep(): { lock: Lock; reason: LockChangeReason }[] {
-    const now = this.now();
+    this.assertFenced();
     const dropped: { lock: Lock; reason: LockChangeReason }[] = [];
     for (const [path, l] of this.locks) {
-      const reason = l.expiresAt <= now ? "expired" : l.holderType === "user" && now - l.lastEditAt >= this.timing.idleMs ? "idle" : null;
+      const reason = this.expiryReason(l);
       if (!reason) continue;
       this.locks.delete(path);
       if (l.holderType === "user") void this.save(`lock:${path}`, "deleteLock", (s) => s.deleteLock(path));
@@ -192,11 +262,22 @@ export class Workspace {
 
   // A path can look inside the workspace and still be a symlink to somewhere else (a real repo
   // can contain `secrets -> /etc`), so check where it actually lands before touching it.
-  private async inside(full: string): Promise<boolean> {
+  private async inside(full: string, writing = false): Promise<boolean> {
     this.realRoot ??= realpath(this.root);
     try {
       const [root, real] = await Promise.all([this.realRoot, realpath(full)]);
-      return real.startsWith(root + sep);
+      if (!real.startsWith(root + sep) || relative(root, real).split(sep).some((p) => p.toLowerCase() === ".git")) return false;
+      if (!writing) return true; // Internal aliases remain browseable, never independent writers.
+      let cursor = root;
+      for (const part of relative(this.root, full).split(sep)) {
+        // Reject symlink/junction and case aliases rather than giving them
+        // independent locks. A physical file must have exactly one directory entry.
+        if (!(await readdir(cursor)).includes(part)) return false;
+        cursor = join(cursor, part);
+        const info = await lstat(cursor);
+        if (info.isSymbolicLink() || (info.isFile() && info.nlink !== 1)) return false;
+      }
+      return true;
     } catch {
       return false;
     }
@@ -251,31 +332,50 @@ export class Workspace {
   }
 
   async applyOps(path: string, userId: string, baseVersion: number, ops: Op[], runId?: string): Promise<OpsResult> {
-    const file = await this.read(path);
-    // Checked after the last await before mutating, so a freeze() can't slip in between.
     while (this.gate && (this.gate.paths === "all" || this.gate.paths.has(path))) await this.gate.open;
-    if (!file) return { ok: false, code: "NOT_HOLDER", currentVersion: 0 };
-    const lock = runId ? this.runLock(path, runId) : this.coveringLock(path, userId);
-    if (!lock || lock.holder !== userId || lock.expiresAt <= this.now()) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
-    if (baseVersion !== file.version || !Array.isArray(ops)) return { ok: false, code: "STALE", currentVersion: file.version };
-    const next = applyOps(file.content, ops);
-    if (next === null || Buffer.byteLength(next) > MAX_FILE_BYTES) return { ok: false, code: "STALE", currentVersion: file.version };
-
-    // Update memory synchronously so the next batch sees this version, then persist before acking.
-    file.content = next;
-    file.version += 1;
-    const version = file.version;
-    lock.lastEditAt = this.now();
-    this.editors.set(path, new Set([...(this.editors.get(path) ?? []), userId]));
-    const full = this.resolvePath(path)!;
-    // The store first: if the process dies in between, the restored version is ahead of the disk,
-    // and a client holding the old version gets STALE instead of editing text it doesn't have.
-    const write = (this.writes.get(path) ?? Promise.resolve())
-      .then(() => this.save(`file:${path}`, "saveFile", (s) => s.saveFile(path, version, userId)))
-      .then(() => writeFile(full, next, "utf8"));
-    this.writes.set(path, write);
-    await write;
-    return { ok: true, version };
+    const write = (this.writes.get(path) ?? Promise.resolve()).catch(() => {}).then(async (): Promise<OpsResult> => {
+      const file = await this.read(path);
+      const full = this.resolvePath(path);
+      if (!file || !full || !(await this.inside(full, true))) return { ok: false, code: "NOT_HOLDER", currentVersion: file?.version ?? 0 };
+      const before = runId ? this.runLock(path, runId) : this.coveringLock(path, userId);
+      if (!before || before.holder !== userId || before.expiresAt <= this.now()) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
+      if (baseVersion !== file.version || !Array.isArray(ops) || applyOps(file.content, ops) === null) return { ok: false, code: "STALE", currentVersion: file.version };
+      // Registered in writes before any await: a container launch under freeze
+      // must drain this operation. Unauthorized attempts never reach the fence.
+      await this.writeFence?.(path);
+      if (!(await this.inside(full, true))) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
+      const handle = await openFile(full, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const info = await handle.stat();
+        if (!info.isFile() || info.nlink !== 1) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
+        const lock = runId ? this.runLock(path, runId) : this.coveringLock(path, userId);
+        if (!lock || lock.holder !== userId || lock.expiresAt <= this.now()) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
+        if (baseVersion !== file.version || !Array.isArray(ops)) return { ok: false, code: "STALE", currentVersion: file.version };
+        const next = applyOps(file.content, ops);
+        if (next === null || Buffer.byteLength(next) > MAX_FILE_BYTES) return { ok: false, code: "STALE", currentVersion: file.version };
+        const temporary = `${full}.pineagent-${randomUUID()}`;
+        try {
+          const staged = await openFile(temporary, "wx", 0o600);
+          try { await staged.writeFile(next, "utf8"); await staged.sync(); await staged.chmod(info.mode & 0o777); }
+          finally { await staged.close(); }
+          // Preserve the existing restart fence: reserve the next persisted
+          // version first. In-memory state changes only after the disk succeeds.
+          await this.save(`file:${path}`, "saveFile", (s) => s.saveFile(path, file.version + 1, userId));
+          await handle.close(); // Windows refuses replacement while this handle is open.
+          await rename(temporary, full);
+        } finally { await rm(temporary, { force: true }); }
+        // A successful disk write, not a proposed edit, advances shared memory.
+        file.content = next;
+        file.version += 1;
+        lock.lastEditAt = this.now();
+        this.editors.set(path, new Set([...(this.editors.get(path) ?? []), userId]));
+        return { ok: true, version: file.version };
+      } finally { await handle.close(); }
+    });
+    const completion = write.then(() => {}, () => {});
+    this.writes.set(path, completion);
+    try { return await write; }
+    finally { if (this.writes.get(path) === completion) this.writes.delete(path); }
   }
 
   // A new empty file or folder (`kind: "dir"`, any trailing "/" optional), with missing parent
@@ -318,6 +418,7 @@ export class Workspace {
   // the run or none is, and the first conflicting lock is returned. The owner's own editor lock
   // conflicts too; their agent waits until they let go of the file.
   acquireForRun(paths: string[], ownerId: string, runId: string): { ok: true; locks: Lock[] } | { ok: false; lock: Lock } {
+    this.assertFenced();
     if (!paths.every((p) => this.resolvePath(p))) throw new Error("Noncanonical workspace path");
     for (const path of paths) {
       for (const l of this.locks.values()) {
@@ -336,6 +437,7 @@ export class Workspace {
   }
 
   releaseRun(runId: string): Lock[] {
+    this.assertFenced();
     const released: Lock[] = [];
     for (const [path, l] of this.locks) {
       if (l.runId !== runId) continue;
@@ -373,14 +475,28 @@ export class Workspace {
   // Hold edits to `paths` (or everything) until the returned function is called, then wait for
   // writes already past the gate to reach disk.
   async freeze(paths: string[] | "all"): Promise<() => void> {
+    // Reserve our turn before yielding. Independent Git/lease freezes must not
+    // overwrite each other's barrier or leave waiting edits stranded forever.
+    const previous = this.freezeTail;
+    let finish!: () => void;
+    this.freezeTail = new Promise<void>((r) => { finish = r; });
+    await previous;
     let open!: () => void;
     this.gate = { paths: paths === "all" ? "all" : new Set(paths), open: new Promise<void>((r) => (open = r)) };
-    const pending = paths === "all" ? [...this.writes.values()] : paths.map((p) => this.writes.get(p));
-    await Promise.all(pending);
-    return () => {
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
       this.gate = null;
       open();
+      finish();
     };
+    try {
+      const pending = paths === "all" ? [...this.writes.values()] : paths.map((p) => this.writes.get(p));
+      await Promise.all(pending);
+      await this.leaseFence?.();
+      return release;
+    } catch (error) { release(); throw error; }
   }
 
   // After Git changed a file on disk: load it, bump the version, and return the old text so the

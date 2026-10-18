@@ -6,6 +6,8 @@ export type User = {
   id: string; // Auth0 sub, e.g. "github|583231"
   name: string; // GitHub login when known
   avatarUrl: string | null;
+  // Backend-issued CLI capability, never copied from unverified JWT claims.
+  session?: { id: string; roomId: string; expiresAt: number };
 };
 
 export type Auth0Options = {

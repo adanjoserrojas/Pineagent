@@ -1,0 +1,55 @@
+import { mkdtemp, writeFile, mkdir, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, it } from "vitest";
+import { Workspace } from "@pineagent/core/server";
+import { RoomSandbox } from "../src/sandbox/room";
+import { SandboxHost } from "../src/sandbox/host";
+import { BackendTools } from "../src/harness/tools";
+import { executeV8Dag, selectCandidateDags, prototypeTools } from "@pineagent/harness";
+
+it("runs verification read-only behind the workspace barrier and releases it after errors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pineagent-room-sandbox-"));
+  await writeFile(join(root, "value.mjs"), "old");
+  const ws = new Workspace(root, { leaseMs: 30_000, idleMs: 600_000 });
+  const calls: string[] = [];
+  const runner = new RoomSandbox(ws, {
+    quiesce: async () => { calls.push("stop"); },
+    ensure: async (session) => { expect(session.grants).toEqual([]); calls.push("open"); return "container"; },
+    execute: async (_session, argv) => { expect(argv).toEqual(["node", "--test", "/workspace/test/value.test.mjs"]); calls.push("test"); throw new Error("deadline"); },
+  });
+  await expect(runner.runTests("alice", "r1", "test/value.test.mjs")).rejects.toThrow("deadline");
+  expect(calls).toEqual(["stop", "open", "test", "stop"]);
+  await ws.acquireSafely("value.mjs", "file", "alice");
+  expect(await ws.applyOps("value.mjs", "alice", 1, [{ offset: 0, length: 3, text: "new" }])).toMatchObject({ ok: true });
+});
+
+it.runIf(Boolean(process.env.PINEAGENT_SANDBOX_IMAGE))("executes V8 through versioned backend writes and real read-only Docker verification", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pineagent-v8-docker-"));
+  const repo = join(root, "repo");
+  for (const dir of [".git", "src", "test"]) await mkdir(join(repo, dir), { recursive: true });
+  await writeFile(join(repo, "package.json"), "{}");
+  await writeFile(join(repo, "src/value.mjs"), "export function value() { return 1; }");
+  await writeFile(join(repo, "test/value.test.mjs"), "import assert from 'node:assert/strict'; import {value} from '../src/value.mjs'; assert.equal(value(),2);");
+  const ws = new Workspace(repo, { leaseMs: 30_000, idleMs: 600_000 });
+  const host = new SandboxHost({ workspaceRoot: root, image: process.env.PINEAGENT_SANDBOX_IMAGE! });
+  const sandbox = new RoomSandbox(ws, host);
+  const candidates = selectCandidateDags({ goalCapability: "verified_change", tools: prototypeTools });
+  const selected = candidates.find(candidate => candidate.routeLabel === "targeted_symbol_search")!;
+  let modelCalls = 0;
+  try {
+    await ws.acquireRunSafely(["src/value.mjs"], "alice", "r1");
+    const result = await executeV8Dag({ trialRoot: repo,
+      task: { id: "r1", prompt: "Fix value() to return 2.", allowedWrites: ["src/value.mjs"], visibleTestPath: "test/value.test.mjs" },
+      candidates, router: { route: async () => ({ status: "selected", candidateId: selected.id }) },
+      synthesize: async () => { modelCalls++; return { files: [{ path: "src/value.mjs", content: "export function value() { return 2; }" }] }; },
+      runtimeFactory: ({ allowedWrites, outputLimit }) => new BackendTools({ ws, ownerId: "alice", runId: "r1", allowedWrites, outputLimit,
+        files: async () => ["package.json", "src/value.mjs", "test/value.test.mjs"],
+        runTests: path => sandbox.runTests("alice", "r1", path), changed: () => {}, boundary: async () => {} }),
+    });
+    expect(result.execution.status).toBe("completed");
+    expect(modelCalls).toBe(1);
+    expect(await ws.read("src/value.mjs")).toMatchObject({ version: 2 });
+    expect(await readFile(join(repo, "src/value.mjs"), "utf8")).toContain("return 2");
+  } finally { await ws.releaseRunSafely("r1"); await host.close(); }
+}, 60_000);
