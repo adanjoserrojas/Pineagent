@@ -1,0 +1,5 @@
+# GitHub's language bar (Linguist) counts bytes. Keep generated data, old snapshots and third-party
+# code out of it, so it reflects the code we write. Also collapses these files in PR diffs.
+firmware/PlantBotTestKit/PlantBotTest/FaceAssets.h linguist-generated
+firmware/PlantBotTestKit/before-*/** linguist-vendored
+firmware/PlantBotTestKit/animations/viewport/rive.js linguist-vendored
