@@ -97,6 +97,37 @@ isolation, approvals, pauses, routing and plant behavior. Web/API typechecks and
 production builds passed. `git diff --check` passed. Existing Monaco chunk-size
 warnings remain.
 
+## Final release and browser confirmation
+
+- Release `93c12b634c5f`, archive SHA256
+  `4a7b32c637bb75f374f90e7361bb27c5dbd4a5d21c3e49b5b5dcb6496779d2d2`.
+  Docker image unchanged:
+  `sha256:dc0b00f70769d600fb5be40cc4209de74f8876da0a98feb36d75895d82a264ac`.
+- Original checksummed installer, deployment lock and expected-previous guard used.
+  SSM `3339fe01-6d66-4e67-96a8-2846c6388ece` succeeded (exit 0), retaining
+  rollback source `/opt/pineagent/releases/fbad0ddaf55a` and stage
+  `/opt/pineagent/pty-stage.p6qQ9B`. One startup connection refusal recovered within
+  the installer's readiness loop. Prior intermediate deployment SSM
+  `077d3988-3878-4ccd-876f-af1e68911e48` also succeeded.
+- Intermediate live Ask `ff99fbc8-d37e-4542-98df-97ed0f7d7a6f` correctly explained
+  protection but reused a sampled test basename. The final prompt also instructs
+  the model to check example names against evidence. Tests/typecheck/build reran
+  successfully after that adjustment.
+- Final exact Ask retry `9d112bf8-6335-4b68-9bc2-8cddc673015c` completed in
+  3,448 ms: one Opus answer, zero router/executor calls, no writes or recovery.
+  It explicitly said `test_app.py` is protected even in Code mode and suggested
+  separate new coverage. Example filenames remain model advice; the coding
+  planner and validator check actual paths before authorizing writes.
+- SSM `b704567e-7f7b-4794-9e6a-5a7a36e149fa` confirmed that receipt, healthy
+  final SHA, Docker/API/sandbox active and zero store errors. The public health
+  endpoint agreed. Saved task height remained 310px after refresh.
+- S3 `latest.txt` was conditionally updated from ETag
+  `89c4515550ca122121abfdf61733f76b` after verification, then downloaded to confirm
+  `93c12b634c5f`. New ETag: `2cba099955634dd8b65e5af85904287b`.
+- Local screenshots and operator artifacts are retained outside the repository in
+  `pineagent-submission-evidence-20261018`; `final-task-view.png` shows the latest
+  completed request and resize grip. No credentials are included.
+
 ## Limits
 
 Model-authored tests are not independent correctness proof. New-test syntax staging
