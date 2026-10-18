@@ -388,30 +388,110 @@ export class Workspace {
     finally { if (this.writes.get(path) === completion) this.writes.delete(path); }
   }
 
-  // One authority barrier spans evidence validation and every file in a model
-  // patch. Unrelated collaborators cannot change an observed dependency midway.
-  // Disk failures can still leave a partial patch; successful files are reported
-  // immediately and are never silently rolled back over another user's work.
-  async applyRunPatch(ownerId: string, runId: string, observed: ReadonlyMap<string, FileState>,
+  /** A missing file is an explicit observation, not permission to replace an
+   * unread binary, directory, alias or file created by another writer. */
+  async observeForRun(path: string): Promise<FileState | null> {
+    const full = this.resolvePath(path);
+    if (!full) throw new Error("Unsafe evidence path");
+    let cursor = this.root;
+    const parts = path.split("/");
+    for (let i = 0; i < parts.length; i++) {
+      const entries = await readdir(cursor);
+      if (!entries.includes(parts[i])) {
+        if (entries.some(entry => entry.toLowerCase() === parts[i].toLowerCase())) throw new Error("Noncanonical evidence path");
+        return null;
+      }
+      cursor = join(cursor, parts[i]);
+      const info = await lstat(cursor);
+      if (info.isSymbolicLink() || (info.isFile() && info.nlink !== 1)) throw new Error("Aliased evidence path");
+      if (i < parts.length - 1 && !info.isDirectory()) throw new Error("Invalid evidence parent");
+      if (i === parts.length - 1 && (!info.isFile() || info.size > MAX_FILE_BYTES)) throw new Error("Unsupported evidence file");
+    }
+    const content = await readFile(full, "utf8");
+    if (content.includes("\0")) throw new Error("Unsupported evidence file");
+    const cached = this.files.get(path);
+    if (cached && cached.content !== content) throw new Error("Evidence changed outside workspace authority");
+    const state = cached ?? { content, version: this.restoredVersions.get(path) ?? 1 };
+    this.files.set(path, state);
+    return { ...state };
+  }
+
+  // Stage the whole patch under the workspace barrier. Validation failures publish
+  // nothing; publication failures restore prior disk contents before releasing it.
+  // This is process-level rollback, not a crash-atomic filesystem transaction.
+  async applyRunPatch(ownerId: string, runId: string, observed: ReadonlyMap<string, FileState | null>,
     files: { path: string; content: string }[], applied: (path: string, version: number, ops: Op[]) => void): Promise<void> {
     const release = await this.freeze("all");
+    const staged: { path: string; full: string; temp: string; before: FileState | null; mode: number; content: string }[] = [];
+    const published: typeof staged = [];
+    const directories: string[] = [];
     try {
+      if (!files.length || files.length > 12 || new Set(files.map(file => file.path)).size !== files.length) throw new Error("Invalid bounded patch");
       for (const [path, expected] of observed) {
-        const actual = await this.read(path);
-        if (!actual || expected.version !== actual.version || expected.content !== actual.content) throw new Error("Evidence changed; a fresh run is required");
+        const actual = await this.observeForRun(path);
+        if (expected === null ? actual !== null : !actual || expected.version !== actual.version || expected.content !== actual.content)
+          throw new Error("Evidence changed; a fresh run is required");
       }
       for (const file of files) {
         const lock = this.runLock(file.path, runId);
-        if (!observed.has(file.path) || !lock || lock.holder !== ownerId) throw new Error("Run no longer owns its write set");
+        if (!observed.has(file.path) || !lock || lock.holder !== ownerId || !this.resolvePath(file.path)) throw new Error("Run no longer owns its write set");
+        if (typeof file.content !== "string" || file.content.includes("\0") || Buffer.byteLength(file.content) > MAX_FILE_BYTES) throw new Error("Invalid patch content");
       }
       for (const file of files) {
-        const expected = observed.get(file.path)!;
-        const ops = [{ offset: 0, length: expected.content.length, text: file.content }];
-        const result = await this.applyOpsInside(file.path, ownerId, expected.version, ops, runId);
-        if (!result.ok) throw new Error(`Workspace rejected patch: ${result.code}`);
-        applied(file.path, result.version, ops);
+        await this.writeFence?.(file.path);
+        const before = observed.get(file.path)!;
+        const full = this.resolvePath(file.path)!;
+        let parent = this.root;
+        for (const part of file.path.split("/").slice(0, -1)) {
+          parent = join(parent, part);
+          try { await mkdir(parent); directories.push(parent); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+          if (!(await this.inside(parent, true))) throw new Error("Unsafe patch parent");
+        }
+        const mode = before ? (await lstat(full)).mode & 0o777 : 0o600;
+        const temp = `${full}.pineagent-${randomUUID()}`;
+        staged.push({ path: file.path, full, temp, before, mode, content: file.content });
+        const handle = await openFile(temp, "wx", mode);
+        try { await handle.writeFile(file.content, "utf8"); await handle.sync(); await handle.chmod(mode); }
+        finally { await handle.close(); }
       }
-    } finally { release(); }
+      // Recheck after asynchronous fences/staging and before the first rename.
+      for (const entry of staged) {
+        const current = await this.observeForRun(entry.path);
+        if (entry.before === null ? current !== null : !current || current.content !== entry.before.content || current.version !== entry.before.version)
+          throw new Error("Evidence changed while staging patch");
+        if (this.runLock(entry.path, runId)?.holder !== ownerId) throw new Error("Run no longer owns its write set");
+      }
+      try {
+        for (const entry of staged) { await rename(entry.temp, entry.full); published.push(entry); }
+      } catch (error) {
+        const failures: unknown[] = [];
+        for (const entry of [...published].reverse()) {
+          try {
+            if (entry.before === null) await rm(entry.full);
+            else { await writeFile(entry.temp, entry.before.content, { flag: "wx", mode: entry.mode }); await rename(entry.temp, entry.full); }
+          } catch (rollback) { failures.push(rollback); }
+        }
+        if (failures.length) throw new AggregateError([error, ...failures], "Patch rollback failed; workspace requires reconciliation");
+        throw error;
+      }
+      for (const entry of staged) {
+        const version = (entry.before?.version ?? this.restoredVersions.get(entry.path) ?? 0) + 1;
+        this.files.set(entry.path, { content: entry.content, version });
+        this.editors.set(entry.path, new Set([...(this.editors.get(entry.path) ?? []), ownerId]));
+        await this.save(`file:${entry.path}`, "saveFile", s => s.saveFile(entry.path, version, ownerId));
+      }
+      for (const entry of staged) {
+        applied(entry.path, this.files.get(entry.path)!.version, [{ offset: 0, length: entry.before?.content.length ?? 0, text: entry.content }]);
+      }
+    } finally {
+      try {
+        for (const entry of staged) await rm(entry.temp, { force: true });
+        // Remove only empty directories created by this attempt. Never recurse.
+        if (published.length !== staged.length) for (const directory of directories.reverse())
+          await import("node:fs/promises").then(fs => fs.rmdir(directory)).catch(() => {});
+      } finally { release(); }
+    }
   }
 
   // A new empty file or folder (`kind: "dir"`, any trailing "/" optional), with missing parent

@@ -5,7 +5,7 @@ import type { FileSnapshot, TestResult, ToolEvent, ToolRuntime } from "@pineagen
 import { taskTerms } from "../../../../harness/dist/src/sandbox-tools.js";
 
 type Snapshot = { content: string; version: number };
-export type EvidenceVersions = Map<string, Snapshot>;
+export type EvidenceVersions = Map<string, Snapshot | null>;
 const TEXT = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".json", ".md"]);
 const PYTHON_TEXT = new Set([".py", ".toml", ".txt", ".ini", ".cfg", ".json", ".md"]);
 
@@ -56,12 +56,12 @@ export class BackendTools implements ToolRuntime {
   async readText(path: string): Promise<string> {
     await this.options.boundary();
     if (!this.options.ws.resolvePath(path)) throw new Error("Unsafe evidence path");
-    const file = await this.options.ws.read(path);
+    const file = await this.options.ws.observeForRun(path);
     if (!file) throw new Error("Evidence file is unavailable or unsupported");
     const old = this.observations.get(path);
-    if (old && (old.version !== file.version || old.content !== file.content)) throw new Error("Evidence changed; a fresh run is required");
+    if (this.observations.has(path) && (!old || old.version !== file.version || old.content !== file.content)) throw new Error("Evidence changed; a fresh run is required");
     this.observations.set(path, { ...file });
-    if ([...this.observations.values()].reduce((sum, entry) => sum + Buffer.byteLength(entry.content), 0) > 16_000_000) throw new Error("Repository exceeds local evidence budget");
+    if ([...this.observations.values()].reduce((sum, entry) => sum + Buffer.byteLength(entry?.content ?? ""), 0) > 16_000_000) throw new Error("Repository exceeds local evidence budget");
     return file.content;
   }
 
@@ -99,8 +99,16 @@ export class BackendTools implements ToolRuntime {
 
   async assertFresh(): Promise<void> {
     for (const [path, seen] of this.observations) {
-      const current = await this.options.ws.read(path);
-      if (!current || current.version !== seen.version || current.content !== seen.content) throw new Error("Evidence changed; a fresh run is required");
+      const current = await this.options.ws.observeForRun(path);
+      if (seen === null ? current !== null : !current || current.version !== seen.version || current.content !== seen.content) throw new Error("Evidence changed; a fresh run is required");
+    }
+  }
+
+  async observeCreates(paths: string[]): Promise<void> {
+    for (const path of paths) {
+      await this.options.boundary();
+      if (!this.options.allowedWrites.includes(path) || await this.options.ws.observeForRun(path) !== null) throw new Error("New-file plan conflicts with workspace");
+      this.observations.set(path, null);
     }
   }
 
