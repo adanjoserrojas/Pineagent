@@ -9,6 +9,23 @@ export class RoomSandbox {
     ws.setWriteFence(() => service.quiesce(ws.root));
   }
 
+  async parseCommand(ownerId: string, line: string): Promise<{ event: string; body: Record<string, unknown> }> {
+    if (!ownerId || typeof line !== "string" || Buffer.byteLength(line) > 8000) throw new Error("Invalid terminal command");
+    const session = { workspace: this.ws.root, owner: `${ownerId}/terminal`, grants: [] };
+    const release = await this.ws.freeze("all");
+    try {
+      const generation = await this.service.ensure(session);
+      const result = await this.service.execute({ ...session, generation }, ["/usr/local/bin/pineagent", "--browser-command", line], 10_000);
+      if (result.code !== 0) throw new Error("Unsupported CLI command");
+      const parsed: unknown = JSON.parse(result.stdout);
+      if (!parsed || typeof parsed !== "object" || !("event" in parsed) || typeof parsed.event !== "string"
+        || !("body" in parsed) || !parsed.body || typeof parsed.body !== "object" || Array.isArray(parsed.body)) throw new Error("Invalid CLI response");
+      return { event: parsed.event, body: parsed.body as Record<string, unknown> };
+    } finally {
+      try { await this.service.quiesce(this.ws.root); } finally { release(); }
+    }
+  }
+
   async runTests(ownerId: string, runId: string, testPath: string | null = null): Promise<TestResult> {
     if (!ownerId || !runId || (testPath && !this.ws.resolvePath(testPath))) throw new Error("Invalid verification scope");
     // Verification must not modify the implementation or its tests. Patch

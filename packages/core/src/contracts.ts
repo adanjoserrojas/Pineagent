@@ -139,6 +139,7 @@ export type GitResult =
   | { jobId: string; userId: string; ok: false; code: GitErrorCode; message: string; paths?: string[] };
 
 export interface ClientToServerEvents {
+  "terminal:command": (msg: { line: string }, ack: (res: { ok: true; result: unknown } | { ok: false; code: "NOT_AVAILABLE" | "REFUSED" }) => void) => void;
   "room:join": (msg: { wsId: string; branch: string }, ack: (res: RoomJoinAck) => void) => void;
   "presence:update": (msg: { openPath: string | null }) => void;
   "lock:acquire": (msg: { path: string; kind: Lock["kind"] }, ack: (res: LockAcquireAck) => void) => void;

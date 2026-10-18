@@ -40,6 +40,7 @@ export type GatewayOptions = {
   harness?: HarnessFactory;
   // Installs sandbox fences before any user or run can mutate room authority.
   protect?(ws: Workspace, ctx: JoinContext): Promise<void>;
+  terminal?(ws: Workspace, ownerId: string, line: string): Promise<{ event: string; body: Record<string, unknown> }>;
   // Where locks, versions and editors are kept so a restart can restore them. None = memory only.
   store?: Store;
   timing?: { heartbeatMs: number; leaseMs: number; idleMs: number; sweepMs: number };
@@ -136,6 +137,7 @@ export function createGateway(opts: GatewayOptions) {
       ws,
       roomId: room,
       files: () => repo.listFiles(),
+      canWrite: async ownerId => !opts.authorize || await opts.authorize({ ...ctx, user: { id: ownerId, name: ownerId, avatarUrl: null } }).catch(() => "UNAVAILABLE") === "ok",
       events: {
         run: (e) => io.to(room).emit("run:event", e),
         lockChanged: (path, lock, reason) => io.to(room).emit("lock:changed", { path, kind: "file", lock, reason }),
@@ -194,6 +196,7 @@ export function createGateway(opts: GatewayOptions) {
 
   io.on("connection", (socket: GatewaySocket) => {
     const { user } = socket.data;
+    let terminalBusy = false;
     log("socket.connected", { user: user.id });
     const joined = async () => {
       const id = socket.data.room;
@@ -324,7 +327,8 @@ export function createGateway(opts: GatewayOptions) {
     socket.on("tree:create", async ({ path, kind }, ack) => {
       const j = await joined();
       if (!j || (kind !== "file" && kind !== "dir")) return ack({ ok: false, code: "INVALID" });
-      const res = await j.ws.create(path, kind, user.id);
+      const res = await j.ws.create(path, kind, user.id, () => active(user) && socket.connected)
+        .catch(() => ({ ok: false as const, code: "INVALID" as const }));
       ack(res);
       if (!res.ok) return;
       log("tree.created", { room: j.room, user: user.id, kind });
@@ -385,6 +389,26 @@ export function createGateway(opts: GatewayOptions) {
       const stillHere = (await io.in(room).fetchSockets()).some((s) => s.data.user.id === user.id);
       if (!stillHere) io.to(room).emit("presence:changed", { ...presenceOf(user), status: "left" });
     });
+
+    socket.on("terminal:command", async ({ line }, ack) => {
+      if (!opts.terminal) return ack({ ok: false, code: "NOT_AVAILABLE" });
+      if (terminalBusy || typeof line !== "string" || Buffer.byteLength(line) > 8000) return ack({ ok: false, code: "REFUSED" });
+      terminalBusy = true;
+      const room = socket.data.room;
+      try {
+        const j = await joined();
+        if (!j || !active(user)) return ack({ ok: false, code: "REFUSED" });
+        const request = await opts.terminal(j.ws, user.id, line);
+        // Reuse authenticated browser handlers; the CLI has no direct write path.
+        const allowed = new Set(["run:start", "run:list", "run:pause", "run:resume", "run:approve", "file:snapshot", "lock:acquire", "lock:release", "git:status"]);
+        if (!allowed.has(request.event) || socket.data.room !== room || !socket.connected || !active(user)) return ack({ ok: false, code: "REFUSED" });
+        const handlers = socket.listeners(request.event as keyof ClientToServerEvents);
+        const handler = handlers[0] as unknown as (body: Record<string, unknown>, done: (result: unknown) => void) => Promise<void>;
+        if (!handler) return ack({ ok: false, code: "REFUSED" });
+        await handler(request.body, result => ack({ ok: true, result }));
+      } catch { ack({ ok: false, code: "REFUSED" }); }
+      finally { terminalBusy = false; }
+    });
   });
 
   return {
@@ -399,14 +423,14 @@ export function createGateway(opts: GatewayOptions) {
       clearInterval(sweeper);
       const saving: Promise<void>[] = [];
       for (const r of rooms.values()) {
-        void r.then(
-          (room) => {
-            room.harness.close();
+        saving.push(r.then(
+          async (room) => {
+            await room.harness.close();
             room.changes.close();
-            saving.push(room.ws.saved());
+            await room.ws.saved();
           },
           () => {},
-        );
+        ));
       }
       await new Promise<void>((resolve) => io.close(() => resolve()));
       await Promise.all(saving); // let the last lock and version writes land before exiting

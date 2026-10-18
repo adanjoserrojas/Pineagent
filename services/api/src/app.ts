@@ -21,7 +21,7 @@ import type { SessionTokens } from "./sandbox/session-tokens";
 
 // Bigger repositories take too long to clone during a demo and fill the disk.
 const MAX_REPO_KB = 500_000;
-const ACCESS_TTL_MS = 5 * 60_000;
+const ACCESS_TTL_MS = 60_000;
 
 export type Log = (event: string, fields?: Record<string, unknown>) => void;
 
@@ -33,10 +33,11 @@ export type AppDeps = {
   store?: Store | null; // null = locks and versions are lost on restart
   sessions?: SessionTokens;
   protect?: GatewayOptions["protect"];
+  terminal?: GatewayOptions["terminal"];
   log: Log;
 };
 
-export function createApp({ config, authenticate, github, harness = noHarness, store = null, sessions, protect, log }: AppDeps) {
+export function createApp({ config, authenticate, github, harness = noHarness, store = null, sessions, protect, terminal, log }: AppDeps) {
   const started = Date.now();
   let storeErrors = 0;
   const logged: Log = (event, fields) => {
@@ -52,6 +53,8 @@ export function createApp({ config, authenticate, github, harness = noHarness, s
           sha: config.sha,
           uptimeS: Math.round((Date.now() - started) / 1000),
           github: Boolean(github),
+          harness: harness !== noHarness,
+          terminal: Boolean(terminal),
           store: store ? { errors: storeErrors } : null,
         }),
       );
@@ -98,6 +101,7 @@ export function createApp({ config, authenticate, github, harness = noHarness, s
       ? sessions?.authenticate(token) ?? null : authenticate(token),
     sessionActive: (user) => sessions?.active(user) ?? false,
     protect,
+    terminal,
     authorize,
     prepare,
     gitCredentials: async (userId) => (github ? tokenEnv(await github.githubToken(userId)) : {}),

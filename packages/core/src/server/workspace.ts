@@ -416,21 +416,31 @@ export class Workspace {
 
   // A new empty file or folder (`kind: "dir"`, any trailing "/" optional), with missing parent
   // folders made on the way. The creator counts as the file's editor, so it's theirs to commit.
-  async create(path: string, kind: "file" | "dir", userId: string): Promise<TreeCreateAck> {
+  async create(path: string, kind: "file" | "dir", userId: string, authorized?: () => boolean): Promise<TreeCreateAck> {
+    const bare = typeof path === "string" ? path.replace(/\/+$/, "") : "";
+    if (!this.resolvePath(bare) || bare.length > 400 || (authorized && !authorized())) return { ok: false, code: "INVALID" };
+    if (this.conflict(kind === "dir" ? `${bare}/` : bare, kind, userId)) return { ok: false, code: "LOCKED" };
+    const release = await this.freeze("all");
+    try { return await this.createInside(path, kind, userId, authorized); }
+    finally { release(); }
+  }
+
+  private async createInside(path: string, kind: "file" | "dir", userId: string, authorized?: () => boolean): Promise<TreeCreateAck> {
     const bare = typeof path === "string" ? path.replace(/\/+$/, "") : "";
     const segments = bare.split("/");
     const full = this.resolvePath(bare);
     if (!full || segments.some((s) => s === "" || s === "." || s === "..") || bare.length > 400) return { ok: false, code: "INVALID" };
     const name = kind === "dir" ? `${bare}/` : bare;
-    while (this.gate?.paths === "all") await this.gate.open; // a rebase is rewriting the tree
-    if (this.conflict(name, "file", userId)) return { ok: false, code: "LOCKED" };
+    if (this.conflict(name, kind, userId)) return { ok: false, code: "LOCKED" };
     // The nearest folder that already exists must really be inside the workspace (not a symlink
     // out of it), or mkdir would create folders wherever that link points.
     let existing = dirname(full);
     while (!(await stat(existing).then(() => true, () => false))) existing = dirname(existing);
-    if (existing !== this.root && !(await this.inside(existing))) return { ok: false, code: "INVALID" };
+    if (existing !== this.root && !(await this.inside(existing, true))) return { ok: false, code: "INVALID" };
     try {
+      if (authorized && !authorized()) return { ok: false, code: "INVALID" };
       await mkdir(dirname(full), { recursive: true });
+      if (authorized && !authorized()) return { ok: false, code: "INVALID" };
       if (kind === "dir") await mkdir(full);
       else await writeFile(full, "", { encoding: "utf8", flag: "wx" });
     } catch (err) {

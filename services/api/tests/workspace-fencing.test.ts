@@ -38,6 +38,19 @@ it("retains authority when a container cannot be stopped, then allows a safe ret
   expect(ws.allLocks()).toEqual([]);
 });
 
+it("fences creation and refuses a queued create after access is revoked", async () => {
+  const { ws } = await fixture();
+  const release = await ws.freeze("all");
+  let active = true;
+  const creation = ws.create("new.ts", "file", "alice", () => active);
+  active = false; release();
+  expect(await creation).toEqual({ ok: false, code: "INVALID" });
+  expect(await ws.read("new.ts")).toBeNull();
+  ws.setLeaseFence(async () => { throw new Error("stop failed"); });
+  await expect(ws.create("new.ts", "file", "alice")).rejects.toThrow("stop failed");
+  expect(await ws.read("new.ts")).toBeNull();
+});
+
 it("never hands off an expired grant before physical revocation succeeds", async () => {
   const { ws, advance } = await fixture();
   ws.acquire("a.ts", "file", "alice");

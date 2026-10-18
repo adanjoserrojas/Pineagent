@@ -20,6 +20,16 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
+    // The browser bridge runs in a networkless container. It emits a typed
+    // request for the authenticated gateway; no tokens or shell are involved.
+    if args.len() == 2 && args[0] == "--browser-command" {
+        let request = command(&args[1])?;
+        println!(
+            "{}",
+            serde_json::json!({"event": request.event, "body": request.body})
+        );
+        return Ok(());
+    }
     if args.iter().any(|s| s == "--help" || s == "-h") {
         println!(
             "Pineagent workspace CLI\nEnvironment: PINEAGENT_URL (HTTPS), PINEAGENT_WORKSPACE, PINEAGENT_BRANCH, PINEAGENT_TOKEN_FILE\nRun with no arguments for the terminal UI. --check verifies login and lists runs.\n--command 'run TASK' sends one command and exits. No AWS/model credentials are used."
