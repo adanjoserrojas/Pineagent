@@ -12,6 +12,8 @@ pub struct Run {
     pub run_id: String,
     pub owner_id: String,
     pub task: String,
+    pub mode: Option<String>,
+    pub answer: Option<String>,
     pub state: String,
     pub seq: u64,
     pub router_mode: Option<String>,
@@ -39,6 +41,10 @@ pub fn command(line: &str) -> Result<Request, &'static str> {
     let (name, rest) = line.trim().split_once(' ').unwrap_or((line.trim(), ""));
     let rest = rest.trim();
     let request = match name {
+        "ask" if !rest.is_empty() => Request {
+            event: "run:start",
+            body: json!({"task": rest, "mode": "ask"}),
+        },
         "run" if !rest.is_empty() => Request {
             event: "run:start",
             body: json!({"task": rest}),
@@ -95,7 +101,7 @@ pub fn command(line: &str) -> Result<Request, &'static str> {
         },
         _ => {
             return Err(
-                "Commands: run TASK | runs | pause/resume ID | approve ID CANDIDATE | reject ID HINT | read PATH | lock/unlock PATH | git-status",
+                "Commands: ask QUESTION (read-only) | run TASK (code) | runs | pause/resume ID | approve ID CANDIDATE | reject ID HINT | read PATH | lock/unlock PATH | git-status",
             );
         }
     };
@@ -202,6 +208,15 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn asks_without_requesting_a_coding_run() {
+        assert_eq!(
+            command("ask what is this repo?").unwrap().body,
+            json!({"task":"what is this repo?", "mode":"ask"})
+        );
+        assert!(command("ask").is_err());
+    }
 
     #[test]
     fn starts_a_task_without_supplying_an_owner() {

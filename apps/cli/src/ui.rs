@@ -54,7 +54,14 @@ pub fn draw(frame: &mut Frame, state: &State, workspace: &str, branch: &str) {
             run.coding_recovery.as_deref().unwrap_or("none")
         ));
         lines.push(format!("  {}", run.task));
-        lines.push(format!("  writes: {}", run.write_set.join(", ")));
+        if run.mode.as_deref() == Some("ask") {
+            lines.push("  Read-only | no files changed".into());
+        } else {
+            lines.push(format!("  writes: {}", run.write_set.join(", ")));
+        }
+        if let Some(answer) = &run.answer {
+            lines.push(format!("  {answer}"));
+        }
         if let Some(error) = &run.error {
             lines.push(format!("  error: {error}"));
         }
@@ -82,13 +89,19 @@ pub fn draw(frame: &mut Frame, state: &State, workspace: &str, branch: &str) {
         }
     }
     if lines.is_empty() {
-        lines.push("No runs. Use: run TASK".into());
+        lines.push("No runs. Use: ask QUESTION (read-only) or run TASK (code)".into());
     }
     frame.render_widget(
-        Paragraph::new(lines.join("\n"))
-            .wrap(Wrap { trim: false })
-            .scroll((state.run_scroll, 0))
-            .block(Block::bordered().title(" Runs / PgUp PgDn scroll / Home resets ")),
+        Paragraph::new(
+            lines
+                .join("\n")
+                .chars()
+                .filter(|c| !c.is_control() || *c == '\n')
+                .collect::<String>(),
+        )
+        .wrap(Wrap { trim: false })
+        .scroll((state.run_scroll, 0))
+        .block(Block::bordered().title(" Runs / PgUp PgDn scroll / Home resets ")),
         areas[1],
     );
     let height = areas[2].height.saturating_sub(2) as usize;
@@ -154,5 +167,30 @@ mod tests {
         for expected in ["targeted", "0.8", "read_file", "src/sum.js"] {
             assert!(text.contains(expected), "missing {expected}");
         }
+    }
+
+    #[test]
+    fn displays_read_only_answers_in_the_original_runs_panel() {
+        let mut state = State::default();
+        state.receive(
+            "run:list",
+            serde_json::json!({"ok":true,"runs":[{
+                "runId":"q1","ownerId":"alice","task":"What is this?","state":"done","seq":2,
+                "mode":"ask","answer":"A Flask notes app."
+            }]}),
+        );
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|f| draw(f, &state, "owner/repo", "main"))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Read-only | no files changed"));
+        assert!(text.contains("A Flask notes app."));
     }
 }
