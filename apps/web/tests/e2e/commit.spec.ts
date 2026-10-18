@@ -40,7 +40,7 @@ async function editFile(page: Page, path: string, text: string) {
 
 const dialog = (page: Page) => page.getByRole("dialog", { name: /Commit to/ });
 async function openDialog(page: Page) {
-  await page.getByRole("button", { name: "Commit…" }).click();
+  await page.getByRole("button", { name: /^Commit, / }).click();
   await expect(dialog(page).getByText(/Your changes/)).toBeVisible();
 }
 const repo = async () => (await mock.room(ROOM)).repo;

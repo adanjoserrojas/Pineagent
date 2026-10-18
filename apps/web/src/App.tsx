@@ -1,5 +1,5 @@
 import { DEV_TOOLS } from "./devtools";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "./auth/AuthGate";
 import { SessionManager } from "./editor/sessions";
 import { CommitDialog } from "./git/CommitDialog";
@@ -7,7 +7,8 @@ import { RunsColumn } from "./runs/RunsColumn";
 import { connectWorkspace, type WorkspaceSocket } from "./net/socket";
 import { createWorkspaceStore, useWorkspace } from "./state/workspace";
 import { FileTree } from "./tree/FileTree";
-import { Avatar } from "./ui/Avatar";
+import { CommitButton } from "./git/CommitButton";
+import { MemberChip } from "./ui/ProfileCard";
 import { ConnectionPill } from "./ui/ConnectionPill";
 import { RepoPicker } from "./ui/RepoPicker";
 import { workspaceFromPath } from "./routes";
@@ -67,6 +68,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
     if (ws.connection === "connected") socket?.emit("presence:update", { openPath });
   }, [socket, openPath, ws.connection]);
 
+  const openCommit = useCallback(() => setCommitOpen(true), []);
   const others = ws.members.filter((m) => m.userId !== ws.self?.userId);
 
   return (
@@ -79,24 +81,25 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
         <ul className="members" aria-label="People in this branch">
           {ws.self && (
             <li>
-              <Avatar name={ws.self.name} url={ws.self.avatarUrl} tone="self" label={`You (${ws.self.name})`} />
+              <MemberChip member={{ ...ws.self, openPath }} isSelf locks={ws.locks} onOpenFile={setOpenPath} />
             </li>
           )}
           {others.map((m) => (
             <li key={m.userId}>
-              <Avatar name={m.name} url={m.avatarUrl} tone="other" label={m.openPath ? `${m.name} · viewing ${m.openPath}` : m.name} />
+              <MemberChip member={m} isSelf={false} locks={ws.locks} onOpenFile={setOpenPath} />
             </li>
           ))}
         </ul>
         <ConnectionPill status={ws.connection} onSignIn={session.signIn} />
-        <button
-          type="button"
-          className="topbar-btn"
-          disabled={ws.connection !== "connected"}
-          onClick={() => setCommitOpen(true)}
-        >
-          Commit…
-        </button>
+        <CommitButton
+          socket={socket}
+          connected={ws.connection === "connected"}
+          selfId={ws.self?.userId ?? null}
+          changes={ws.changes}
+          queue={ws.gitQueue}
+          lastResult={ws.lastGitResult}
+          onClick={openCommit}
+        />
         <span className="who">{ws.self?.name ?? session.displayName}</span>
       </header>
       {socket && (

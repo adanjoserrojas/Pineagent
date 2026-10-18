@@ -128,7 +128,7 @@ test("uncommitted changes show an M on the file and a dot on its folders, for ev
 
   // Once alice commits, the letter goes away for both of them.
   await page.getByRole("button", { name: "Release lock" }).click();
-  await page.getByRole("button", { name: "Commit…" }).click();
+  await page.getByRole("button", { name: /^Commit, / }).click();
   await page.getByLabel("Commit message").fill("hi");
   await page.getByRole("button", { name: "Commit 1 file" }).click();
   await expect(bob.getByText("No uncommitted changes on this branch.")).toBeVisible();
