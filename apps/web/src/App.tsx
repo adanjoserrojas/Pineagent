@@ -1,5 +1,5 @@
 import { DEV_TOOLS } from "./devtools";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./auth/AuthGate";
 import { SessionManager } from "./editor/sessions";
 import { CommitDialog } from "./git/CommitDialog";
@@ -11,6 +11,8 @@ import { Avatar } from "./ui/Avatar";
 import { ConnectionPill } from "./ui/ConnectionPill";
 import { RepoPicker } from "./ui/RepoPicker";
 import { workspaceFromPath } from "./routes";
+import { CrownMark } from "./ui/CrownMark";
+import { WorkspaceIcon } from "./ui/WorkspaceIcon";
 
 // Monaco is most of the bundle; load it only once a file is opened.
 const EditorPane = lazy(() => import("./editor/EditorPane"));
@@ -33,6 +35,15 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
   const [socket, setSocket] = useState<WorkspaceSocket | null>(null);
   const [openPath, setOpenPath] = useState<string | null>(null);
   const [commitOpen, setCommitOpen] = useState(false);
+  const [panel, setPanel] = useState<"files" | "editor" | "agents">("files");
+  const shell = useRef<HTMLDivElement>(null);
+  function showPanel(next: typeof panel) {
+    setPanel(next);
+    requestAnimationFrame(() => {
+      const selector = next === "files" ? ".explorer-filter input" : next === "agents" ? "#run-task" : ".workspace-main";
+      shell.current?.querySelector<HTMLElement>(selector)?.focus();
+    });
+  }
 
   useEffect(() => {
     const s = connectWorkspace({ apiUrl: apiUrl(), wsId, branch, getToken: session.getToken, store });
@@ -69,11 +80,11 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
   const others = ws.members.filter((m) => m.userId !== ws.self?.userId);
 
   return (
-    <div className="app">
+    <div className="app crown" ref={shell} data-panel={panel}>
       <header className="topbar">
-        <span className="brand">Pineagent</span>
-        <span className="mono">{wsId}</span>
-        <span className="branch mono">{branch}</span>
+        <span className="brand"><CrownMark />pineagent<span className="brand-edition">CROWN</span></span>
+        <span className="workspace-name mono" title={wsId}>{wsId}</span>
+        <span className="branch mono" title={branch}><WorkspaceIcon name="branch" />{branch}</span>
         <span className="spacer" />
         <ul className="members" aria-label="People in this branch">
           {ws.self && (
@@ -111,7 +122,19 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
         />
       )}
       <div className="body">
-        <nav className="tree" aria-label="Explorer">
+        <nav className="workspace-rail" aria-label="Workspace panels">
+          {(["files", "editor", "agents"] as const).map((name) => (
+            <button key={name} type="button" aria-label={name === "files" ? "Show files" : name === "editor" ? "Show editor" : "Show agents"}
+              aria-pressed={panel === name} aria-controls={`panel-${name}`} onClick={() => showPanel(name)}>
+              <WorkspaceIcon name={name} /><span>{name}</span>
+            </button>
+          ))}
+          <button type="button" aria-label="Review changes" title="Review changes" disabled={ws.connection !== "connected"} onClick={() => setCommitOpen(true)}>
+            <WorkspaceIcon name="branch" /><span>Changes</span>
+          </button>
+          <CrownMark className="rail-crown" />
+        </nav>
+        <nav className="tree" id="panel-files" aria-label="Explorer">
           <FileTree
             paths={ws.tree}
             locks={ws.locks}
@@ -120,10 +143,26 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
             selfId={ws.self?.userId ?? null}
             openPath={openPath}
             loading={ws.connection !== "connected"}
-            onOpen={setOpenPath}
+            onOpen={(path) => { setOpenPath(path); setPanel("editor"); }}
           />
+          <section className="branch-people" aria-label="Branch presence">
+            <h2 className="section-label">In this branch <span>{ws.members.length}</span></h2>
+            {ws.members.map((member) => (
+              <div className="person-row" key={member.userId}>
+                <Avatar name={member.name} url={member.avatarUrl} size={24} tone={member.userId === ws.self?.userId ? "self" : "other"} />
+                <div><strong>{member.userId === ws.self?.userId ? "You" : member.name}</strong>
+                  <small title={(member.userId === ws.self?.userId ? openPath : member.openPath) ?? undefined}>
+                    {(member.userId === ws.self?.userId ? openPath : member.openPath)
+                      ? `Viewing ${member.userId === ws.self?.userId ? openPath : member.openPath}` : "In the workspace"}
+                  </small>
+                </div>
+              </div>
+            ))}
+            {ws.members.length === 0 && <p className="run-note">Waiting for workspace presence…</p>}
+          </section>
+          <p className="ownership-note"><WorkspaceIcon name="lock" />One writer. Everyone in sync.</p>
         </nav>
-        <main className="workspace-main">
+        <main className="workspace-main" id="panel-editor" tabIndex={-1}>
           {openPath && manager ? (
             <Suspense fallback={<p className="editor-note">Starting editor…</p>}>
               <EditorPane
@@ -136,11 +175,26 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
               />
             </Suspense>
           ) : (
-            <p className="editor-note">Select a file to open it.</p>
+            <div className="workspace-welcome">
+              <CrownMark />
+              <p className="section-label">Your shared workspace</p>
+              <h1>Good work grows here.</h1>
+              <p>Open a file. Give your agent a task.<br />Build together, with clear ownership.</p>
+              <button type="button" className="btn-secondary" onClick={() => showPanel("files")}>Browse files</button>
+            </div>
           )}
         </main>
-        {socket && <RunsColumn ws={ws} socket={socket} branch={branch} />}
+        <div className="agent-column" id="panel-agents">
+          {socket && <RunsColumn ws={ws} socket={socket} branch={branch} />}
+        </div>
       </div>
+      <footer className="workspace-footer">
+        <span><WorkspaceIcon name="branch" />{branch}</span>
+        <span>{ws.changes.size} changed {ws.changes.size === 1 ? "file" : "files"}</span>
+        <span className="spacer" />
+        <span>{ws.locks.size} active {ws.locks.size === 1 ? "lock" : "locks"}</span>
+        <span className="footer-edition">PINEAGENT / CROWN</span>
+      </footer>
     </div>
   );
 }
