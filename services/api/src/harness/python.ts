@@ -58,9 +58,10 @@ export const pythonLanguage: RepositoryLanguage = {
 };
 
 /** Select only supported validators; a mixed-language write plan must be replanned. */
-export function languageForPlan(plan: { visibleTestPath: string; allowedWrites: string[] }): RepositoryLanguage | undefined {
+export function languageForPlan(plan: { visibleTestPath: string; allowedWrites: string[]; createPaths?: string[] }): RepositoryLanguage | undefined {
   if (pythonFile(plan.visibleTestPath)) {
-    if (!testFile(plan.visibleTestPath) || !plan.allowedWrites.every(pythonLanguage.isSource)) throw new Error("Unsupported Python write/test scope");
+    if (!testFile(plan.visibleTestPath) || !plan.allowedWrites.every(file => pythonLanguage.isSource(file)
+      || (plan.createPaths?.includes(file) && pythonFile(file) && testFile(file)))) throw new Error("Unsupported Python write/test scope");
     return pythonLanguage;
   }
   if (!/\.[cm]?js$/.test(plan.visibleTestPath) || plan.allowedWrites.some(file => file.endsWith(".py"))) throw new Error("Unsupported verification language");

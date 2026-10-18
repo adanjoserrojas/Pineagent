@@ -2,15 +2,16 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Harness, HarnessContext } from "@pineagent/core/server";
 import type { RunActionAck, RunStartAck, RunView } from "@pineagent/core/contracts";
-import { executeV8Dag, selectCandidateDags, prototypeTools, FROZEN_HISTORY,
+import { executeV8Dag, selectCandidateDags, prototypeTools, FROZEN_HISTORY, javascriptLanguage,
   type Router, type RouteDecision, type Patch, type TestResult, type DagCandidate } from "@pineagent/harness";
 import { BackendTools, type EvidenceVersions } from "./tools";
 import { languageForPlan } from "./python";
 import type { ModelReceipt } from "../models/bedrock";
+import { validateFeaturePlan, type FeaturePlan } from "./feature-plan";
 
 type Model = {
   receipts?(): ModelReceipt[];
-  plan(task: string, files: string[], signal?: AbortSignal): Promise<{ allowedWrites: string[]; visibleTestPath: string }>;
+  plan(task: string, files: string[], signal?: AbortSignal): Promise<FeaturePlan>;
   patch(input: { task: string; evidence: string; allowedWrites: string[] }, signal?: AbortSignal, recovery?: boolean): Promise<Patch>;
 };
 type Run = { view: RunView; abort: AbortController; work: Promise<void>; pause: boolean;
@@ -148,14 +149,13 @@ export class LiveHarness implements Harness {
         this.emit(run, { state: "planning" });
         const files = await runtime([]).listFiles();
         providerAttempts++;
-        const plan = await activeModel.plan(run.view.task, files, run.abort.signal);
-        if (!plan.allowedWrites.length || plan.allowedWrites.length > 12 || plan.allowedWrites.some(p => !files.includes(p))
-          || !files.includes(plan.visibleTestPath) || plan.allowedWrites.includes(plan.visibleTestPath)) throw new Error("Invalid plan");
+        const plan = validateFeaturePlan(await activeModel.plan(run.view.task, files, run.abort.signal), files);
         const language = languageForPlan(plan);
         validator = language ? "python" : "node";
         run.view.writeSet = [...new Set(plan.allowedWrites)];
         run.candidates = selectCandidateDags({ goalCapability: "verified_change", tools: prototypeTools });
         await this.acquire(run);
+        await runtime(plan.allowedWrites).observeCreates(plan.createPaths ?? []);
         while (true) {
           await boundary();
           this.emit(run, { state: "routing", candidates: undefined });
@@ -173,7 +173,7 @@ export class LiveHarness implements Harness {
             return decision;
           } };
           const result = await executeV8Dag({ trialRoot: context.ws.root,
-            language,
+            language: language ?? javascriptLanguage, evidenceLimit: 48_000,
             task: { id: runId, prompt: run.view.task, ...plan }, candidates: run.candidates, router, history: FROZEN_HISTORY,
             runtimeFactory: ({ allowedWrites, outputLimit }) => runtime(allowedWrites, outputLimit),
             synthesize: async input => { await boundary(); await runtime([]).assertFresh();
@@ -192,7 +192,7 @@ export class LiveHarness implements Harness {
           executorModelCalls += result.execution.modelCalls;
           if (result.execution.status === "awaiting_approval") {
             await this.release(run);
-            const candidates = run.candidates.map(c => ({ id: c.id, score: result.route.probabilities?.[c.id] ?? 0, steps: steps(c) }))
+            const candidates = run.candidates.map(c => ({ id: c.id, score: result.route.probabilities?.[c.routeLabel] ?? 0, steps: steps(c) }))
               .sort((a, b) => b.score - a.score).slice(0, 3);
             this.emit(run, { state: "awaiting_approval", candidates });
             const until = Date.now() + 10 * 60_000;
