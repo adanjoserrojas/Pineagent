@@ -7,7 +7,7 @@ export interface PlantSink {
   show(face: FaceKey): void;
 }
 
-class PlantBridge {
+export class PlantBridge {
   private face: FaceKey = "idle";
   private readonly sinks = new Set<PlantSink>();
 
@@ -32,4 +32,4 @@ class PlantBridge {
 export const plantBridge = new PlantBridge();
 
 // Lets the Hardware Engineer try a bridge from the console, and lets e2e read the face.
-if (DEV_TOOLS) (window as unknown as { __plant?: PlantBridge }).__plant = plantBridge;
+if (DEV_TOOLS && typeof window !== "undefined") (window as unknown as { __plant?: PlantBridge }).__plant = plantBridge;

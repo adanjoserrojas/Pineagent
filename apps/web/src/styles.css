@@ -259,6 +259,9 @@ button { font: inherit; }
 .plant-face { display: block; width: 100%; height: 100%; }
 .plant-caption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font-size: 12px; color: var(--muted); }
 .plant-title { color: var(--text); font-weight: 500; }
+.plant-link { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; margin: -2px 0 0; font-size: 12px; color: var(--muted); }
+.plant-link[data-robot="on"] > span { color: var(--text); }
+.plant-link-note { flex-basis: 100%; margin: 0; font-size: 11px; line-height: 16px; color: #7f9187; }
 
 /* Light motion after the Rive loops in all-states-motion.gif; off for reduced motion. */
 @media (prefers-reduced-motion: no-preference) {
@@ -451,6 +454,7 @@ button:not(:disabled):hover.btn-primary { background: #e4efa9; }
 .crown .runs { gap: 0; padding: 0; overflow: hidden; }
 .agent-heading { padding: 20px 16px 14px; }
 .crown .plant { flex-shrink: 0; flex-direction: row; align-items: center; gap: 12px; padding: 0 16px 16px; border-bottom: 1px solid var(--line); }
+.crown .plant-link { flex-shrink: 0; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); }
 .crown .plant-screen { width: 68px; height: 44px; flex: 0 0 68px; }
 .crown .plant-caption { min-width: 0; flex-direction: column; align-items: flex-start; gap: 3px; font-size: 11px; }
 .crown .plant-title { font-size: 13px; }
