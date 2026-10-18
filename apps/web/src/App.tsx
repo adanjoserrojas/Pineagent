@@ -63,9 +63,11 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
     if (shell.current) observer.observe(shell.current);
     return () => observer.disconnect();
   }, []);
-  const sideBudget = Math.max(430, available.width - 420);
-  const sideMinimum = (layout.filesVisible ? 190 : 0) + (layout.agentsVisible ? 240 : 0);
-  const extra = (layout.filesVisible ? Math.max(0, layout.explorer - 190) : 0) + (layout.agentsVisible ? Math.max(0, layout.agents - 240) : 0);
+  const agentSplit = available.width > 700 && available.width <= 900 && panel !== "files" && layout.agentsVisible;
+  const explorerShown = available.width > 900 && layout.filesVisible;
+  const sideBudget = Math.max(agentSplit ? 240 : 430, available.width - (agentSplit ? 360 : 420));
+  const sideMinimum = (explorerShown ? 190 : 0) + (layout.agentsVisible ? 240 : 0);
+  const extra = (explorerShown ? Math.max(0, layout.explorer - 190) : 0) + (layout.agentsVisible ? Math.max(0, layout.agents - 240) : 0);
   const scale = Math.min(1, Math.max(0, sideBudget - sideMinimum) / Math.max(1, extra));
   const explorerWidth = 190 + Math.round(Math.max(0, layout.explorer - 190) * scale);
   const agentWidth = 240 + Math.round(Math.max(0, layout.agents - 240) * scale);
@@ -134,7 +136,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
 
   return (
     <div className="app crown" ref={shell} data-panel={panel}
-      data-files={layout.filesVisible} data-agents={layout.agentsVisible}
+      data-files={layout.filesVisible} data-agents={layout.agentsVisible} data-agent-split={agentSplit}
       style={{ "--explorer-width": `${explorerWidth}px`, "--agent-width": `${agentWidth}px`, "--activity-height": `${activityHeight}px` } as CSSProperties}>
       <header className="topbar">
         <span className="brand"><CrownMark />pineagent<span className="brand-edition">CROWN</span></span>
@@ -256,7 +258,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
           <div className="activity-dock" hidden={!layout.activityVisible}><BranchActivity ws={ws} onCollapse={() => setLayout((l) => ({ ...l, activityVisible: false }))} /></div>
           {terminalOpen && socket && <WorkspaceTerminal socket={socket} onClose={() => { setTerminalOpen(false); terminalToggle.current?.focus(); }} />}
         </main>
-        {layout.agentsVisible && <ResizeHandle label="Resize agents" reverse value={agentWidth} min={240} max={Math.max(240, Math.min(520, sideBudget - (layout.filesVisible ? explorerWidth : 0)))}
+        {layout.agentsVisible && <ResizeHandle label="Resize agents" reverse value={agentWidth} min={240} max={Math.max(240, Math.min(800, sideBudget - (explorerShown ? explorerWidth : 0)))}
           onChange={(agents) => setLayout((l) => ({ ...l, agents }))} onReset={() => setLayout((l) => ({ ...l, agents: defaultLayout.agents }))} />}
         <div className="agent-column" id="panel-agents">
           <div className="panel-controls"><span>AGENT WORKSPACE</span><button type="button" aria-label="Collapse agents" title="Collapse agents" onClick={() => { setLayout((l) => ({ ...l, agentsVisible: false })); showPanel("editor"); }}>›</button></div>

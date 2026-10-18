@@ -36,6 +36,7 @@ const faces = (p: Page) => p.evaluate(() => (window as unknown as { __faces: str
 const card = (p: Page) => p.getByRole("list", { name: "Runs" }).locator("article").first();
 
 async function startRun(p: Page, task: string) {
+  await p.getByRole("radio", { name: "Code", exact: true }).check();
   await p.getByLabel("Ask your agent").fill(task);
   await p.getByRole("button", { name: "Start run" }).click();
   await expect(card(p)).toBeVisible();
@@ -44,6 +45,25 @@ async function startRun(p: Page, task: string) {
 test.beforeEach(() => {
   // A fresh mock per test (joinAs creates it lazily so tests can pass options).
   mock = undefined as unknown as Mock;
+});
+
+test("Ask is the safe default and renders a read-only answer without coding controls", async ({ browser }) => {
+  const alice = await joinAs(browser, "alice");
+  await expect(alice.getByRole("radio", { name: "Ask (read-only)" })).toBeChecked();
+  await alice.getByLabel("Ask your agent").fill("What is this repo about?");
+  await alice.getByRole("button", { name: "Start run" }).click();
+  await expect(card(alice).getByTestId("run-state")).toHaveText("done");
+  await expect(card(alice).getByLabel("Agent answer")).toContainText("Mock read-only answer");
+  await expect(card(alice)).toContainText("Read-only · no files changed");
+  await expect(card(alice).getByTestId("router-mode")).toHaveCount(0);
+  await expect(card(alice).getByRole("button", { name: "Pause", exact: true })).toHaveCount(0);
+  await expect(card(alice).locator(".run-steps")).toHaveCount(0);
+  await alice.screenshot({ path: "test-results/ask-desktop.png" });
+  await alice.setViewportSize({ width: 390, height: 844 });
+  await alice.getByRole("button", { name: "Show agents", exact: true }).click();
+  await expect(card(alice).getByLabel("Agent answer")).toBeVisible();
+  expect(await alice.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await alice.screenshot({ path: "test-results/ask-mobile.png" });
 });
 
 test("a run goes planning → routing → executing → done, and the plant follows", async ({ browser }) => {

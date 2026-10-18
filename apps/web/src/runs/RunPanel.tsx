@@ -43,6 +43,7 @@ type Props = {
 // approval questions, and see what the plant is showing (LLD 9 and 11).
 export function RunPanel({ socket, runs, selfId, members, branch, plant, connected }: Props) {
   const [task, setTask] = useState("");
+  const [mode, setMode] = useState<"ask" | "code">("ask");
   const [starting, setStarting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -59,7 +60,7 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
     setStarting(true);
     setProblem(null);
     try {
-      const res = await socket.timeout(ACK_TIMEOUT_MS).emitWithAck("run:start", { task });
+      const res = await socket.timeout(ACK_TIMEOUT_MS).emitWithAck("run:start", { task, mode });
       if (res.ok) setTask("");
       else setProblem(res.code === "NOT_AVAILABLE" ? "Agent runs aren’t available on this server yet." : "The server didn’t accept that task.");
     } catch {
@@ -98,17 +99,24 @@ export function RunPanel({ socket, runs, selfId, members, branch, plant, connect
         )}
       </div>
       <form className="run-form" onSubmit={start}>
+        <fieldset className="run-mode" disabled={starting}>
+          <legend>Agent mode</legend>
+          <label className="run-option"><input type="radio" name="agent-mode" checked={mode === "ask"} onChange={() => setMode("ask")} />Ask (read-only)</label>
+          <label className="run-option"><input type="radio" name="agent-mode" checked={mode === "code"} onChange={() => setMode("code")} />Code</label>
+        </fieldset>
         <label htmlFor="run-task">Ask your agent</label>
         <textarea
           id="run-task"
           rows={3}
           value={task}
-          placeholder="e.g. Add a test for currentUser"
+          placeholder={mode === "ask" ? "e.g. What is this repository about?" : "Describe a source change and its expected behavior"}
+          maxLength={8000}
           onChange={(e) => setTask(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) start(e);
           }}
         />
+        <p className="run-note">{mode === "ask" ? "Reads a bounded file sample. No changes or commands." : "Edits existing JavaScript/Python source and verifies with existing tests. May need your approval."}</p>
         {DEV_TOOLS && (
           <p className="run-hint">
             Mock agent: include <code>unsure</code>, <code>backup</code>, <code>fallback</code>, <code>recover</code> or <code>fail</code>, or a file name like <code>db.ts</code>.
@@ -182,6 +190,7 @@ function RunCard({
       <p className="run-task">{run.task}</p>
       <div className="run-details" id={detailsId} hidden={collapsed}>
       <div className="run-badges">
+        {run.mode === "ask" && <span className="run-badge">Read-only · no files changed</span>}
         <span className="run-id mono">run {shortId(run.runId)}</span>
         {run.routerMode && (
           <span className={`run-badge${run.routerMode === "llm" || run.routerMode === "jev" ? " run-badge-warn" : ""}`} data-testid="router-mode">
@@ -200,6 +209,9 @@ function RunCard({
           </span>
         ))}
       </div>
+
+      {run.answer && <div className="run-answer" aria-label="Agent answer">{run.answer}</div>}
+      {run.mode === "ask" && run.evidencePaths && <p className="run-note">Sampled: {run.evidencePaths.join(", ") || "no supported text files"}. Not an exhaustive review.</p>}
 
       {run.state === "blocked" && run.blockedOn && (
         <p className="run-note">
@@ -236,11 +248,11 @@ function RunCard({
 
       {run.state === "error" && run.error && (
         <p className="run-error" role="alert">
-          Failed at step {run.error.nodeIndex + 1}: {run.error.message}
+          {run.error.phase ? `Failed during ${run.error.phase}` : run.error.nodeIndex < 0 ? "Failed before execution" : `Failed at step ${run.error.nodeIndex + 1}`}: {run.error.message}
         </p>
       )}
 
-      {mine && (PAUSABLE.has(run.state) || run.state === "paused") && (
+      {mine && run.mode !== "ask" && (PAUSABLE.has(run.state) || run.state === "paused") && (
         <div className="run-actions">
           {run.state === "paused" ? (
             <button type="button" className="btn-secondary" disabled={busy} onClick={() => call("run:resume")}>

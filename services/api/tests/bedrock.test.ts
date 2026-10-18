@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { OpusRun, OPUS_MODEL, type ModelTransport } from "../src/models/bedrock";
 
 describe("bounded Opus model gateway", () => {
+  it("reports malformed patch output distinctly without exposing provider text", async () => {
+    const run = new OpusRun({ runId: "r", ownerId: "alice", transport: async () => ({
+      $metadata: { requestId: "format-failure" }, stream: (async function* () {
+        yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: "not-json PRIVATE_PROVIDER_TEXT" } } };
+        yield { messageStop: { stopReason: "end_turn" } };
+      })(),
+    }) });
+    await expect(run.patch({ task: "repair", evidence: "", allowedWrites: ["app.py"] }))
+      .rejects.toMatchObject({ code: "MODEL_INVALID_JSON" });
+    expect(run.receipts()).toMatchObject([{ failureCode: "MODEL_INVALID_JSON", stopReason: "end_turn" }]);
+    expect(JSON.stringify(run.receipts())).not.toContain("PRIVATE_PROVIDER_TEXT");
+  });
   it("uses Opus 4.6 adaptive thinking and returns validated patch text with usage", async () => {
     const transport: ModelTransport = async (input) => {
       expect(input.modelId).toBe(OPUS_MODEL);
