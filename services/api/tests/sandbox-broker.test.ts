@@ -19,6 +19,8 @@ it("exposes only bounded sandbox operations and never a host command endpoint", 
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   });
   try {
+    const health = await fetch(`http://127.0.0.1:${address.port}/health`);
+    expect(await health.json()).toEqual({ ok: true, protocol: "pty-v1", terminal: false });
     expect((await post("/host/exec", { command: "id" })).status).toBe(404);
     expect((await post("/open", { workspace: "/tmp/repo", owner: "alice", grants: [42] })).status).toBe(400);
     expect(calls).toBe(0);

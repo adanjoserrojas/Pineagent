@@ -1,8 +1,8 @@
 # Sandbox supervisor boundary (SE1, LLD box 7)
 
 `host.ts` is the Docker-side component of the supervisor, not a public API handler.
-It is intentionally **not wired into `main.ts`** until the restricted supervisor
-transport, ownership reconciliation, and room authority adapter are complete.
+`main.ts` activates it explicitly with HARNESS_ENABLED and the private supervisor
+socket; missing provider configuration fails closed.
 Do not give the API user membership in the Docker group or mount the Docker socket
 into the API/CLI. Docker authority belongs only to a separately managed supervisor.
 
@@ -37,7 +37,8 @@ masking, missing credentials/socket/network, and termination of an inherited
 writable file descriptor after revocation. Other tests fake only the Docker
 process boundary to exercise daemon failure and restart reconciliation.
 
-Pending before activation: narrow supervisor IPC, shell-change versions/editor
-attribution, authoritative grant adapter, scoped CLI sessions, browser PTY,
-frozen-harness runtime wiring, and deployment approval. This component alone is
-not evidence that the deployed workspace is isolated.
+Private supervisor IPC, authoritative workspace adapters, scoped CLI sessions,
+browser PTY and frozen-harness runtime wiring are implemented. See
+contracts/TERMINAL.md for the separate no-repository TUI sandbox. General shell
+mutation reconciliation remains out of scope; current edits use backend versions.
+Deployment approval exists, but local tests alone are not deployed evidence.

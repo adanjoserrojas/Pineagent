@@ -32,7 +32,7 @@ export class SandboxHost {
   constructor(private readonly config: { workspaceRoot: string; image: string; uid?: number; command?: DockerCommand }) {
     if (!/^sha256:[a-f0-9]{64}$/.test(config.image)) throw new Error("Pin the sandbox image to its local immutable image ID");
     this.uid = config.uid ?? 1000;
-    if (!Number.isSafeInteger(this.uid) || this.uid < 1000 || this.uid > 60_000) throw new Error("Sandbox must use a non-root UID");
+    if (!Number.isSafeInteger(this.uid) || this.uid < 1 || this.uid > 60_000) throw new Error("Sandbox must use a non-root UID");
     this.command = config.command ?? dockerCommand;
     this.scope = createHash("sha256").update(resolve(config.workspaceRoot)).digest("hex");
   }

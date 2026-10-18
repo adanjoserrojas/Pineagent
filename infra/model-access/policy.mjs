@@ -1,9 +1,9 @@
-import { Stack, CfnParameter, aws_iam as iam } from "aws-cdk-lib";
+import { Stack, BootstraplessSynthesizer, CfnParameter, CfnCondition, Fn, aws_iam as iam } from "aws-cdk-lib";
 
 // Additive policy only: Terraform continues to own the host and its IAM role.
 export class ModelAccessStack extends Stack {
   constructor(scope, id, props = {}) {
-    super(scope, id, props);
+    super(scope, id, { ...props, synthesizer: new BootstraplessSynthesizer() });
     const role = new CfnParameter(this, "ApplicationRoleName", {
       type: "String", default: "pineagent-app", allowedPattern: "[A-Za-z0-9+=,.@_-]{1,64}",
       description: "Existing non-root EC2 application role managed by Terraform",
@@ -30,5 +30,16 @@ export class ModelAccessStack extends Stack {
         ],
       },
     });
+    // Exact, operator-supplied secret ARNs. No listing, writes, or wildcard access.
+    for (const name of ["Decisions", "Jev"]) {
+      const secret = new CfnParameter(this, `${name}SecretArn`, { type: "String", default: "",
+        allowedPattern: "^$|^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$" });
+      const configured = new CfnCondition(this, `${name}SecretConfigured`, {
+        expression: Fn.conditionNot(Fn.conditionEquals(secret.valueAsString, "")),
+      });
+      const policy = new iam.CfnPolicy(this, `${name}SecretRead`, { policyName: `pineagent-${name.toLowerCase()}-read`, roles: [role.valueAsString],
+        policyDocument: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "secretsmanager:GetSecretValue", Resource: secret.valueAsString }] } });
+      policy.cfnOptions.condition = configured;
+    }
   }
 }

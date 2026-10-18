@@ -4,6 +4,12 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { SandboxHost, type DockerCommand } from "../src/sandbox/host";
 
+it("accepts the dedicated system account but never root as a sandbox identity", () => {
+  const config = { workspaceRoot: tmpdir(), image: `sha256:${"a".repeat(64)}` };
+  expect(() => new SandboxHost({ ...config, uid: 993 })).not.toThrow();
+  for (const uid of [0, -1, 1.5, 60001]) expect(() => new SandboxHost({ ...config, uid })).toThrow("non-root");
+});
+
 it("does not launch an abandoned queued open and rejects stale generations", async () => {
   const root = await mkdtemp(join(tmpdir(), "pineagent-admission-"));
   const workspace = join(root, "repo");

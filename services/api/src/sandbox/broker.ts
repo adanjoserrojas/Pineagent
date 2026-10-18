@@ -34,6 +34,7 @@ export function createSandboxBroker(host: SandboxService, terminal?: TerminalBac
       res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
       res.end(JSON.stringify(value));
     };
+    if (req.method === "GET" && req.url === "/health") return send(200, { ok: true, protocol: "pty-v1", terminal: Boolean(terminal) });
     if (req.method !== "POST" || !["/open", "/execute", "/quiesce", ...(terminal ? ["/terminal/open", "/terminal/read", "/terminal/input", "/terminal/resize", "/terminal/close"] : [])].includes(req.url ?? "")) return send(404, { error: "NOT_FOUND" });
     if (Number(req.headers["content-length"]) > LIMIT) { req.resume(); return send(413, { error: "TOO_LARGE" }); }
     let value: unknown;

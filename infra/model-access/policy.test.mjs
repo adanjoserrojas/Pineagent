@@ -7,8 +7,10 @@ import { ModelAccessStack } from "./policy.mjs";
 test("adds only a scoped policy to the existing application role, never credentials or infrastructure", () => {
   const template = Template.fromStack(new ModelAccessStack(new App(), "Test")).toJSON();
   const resources = Object.values(template.Resources);
-  assert.equal(resources.length, 1);
-  const policy = resources[0];
+  assert.equal(template.Parameters.BootstrapVersion, undefined);
+  assert.equal(template.Rules, undefined);
+  assert.equal(resources.length, 3);
+  const policy = template.Resources.Opus46Access;
   assert.equal(policy.Type, "AWS::IAM::Policy");
   assert.deepEqual(policy.Properties.Roles, [{ Ref: "ApplicationRoleName" }]);
   const statements = policy.Properties.PolicyDocument.Statement;
@@ -24,4 +26,14 @@ test("adds only a scoped policy to the existing application role, never credenti
     assert.ok(JSON.stringify(statements[1].Resource).includes(`${region}::foundation-model/anthropic.claude-opus-4-6-v1`));
   }
   assert.ok(JSON.stringify(statements[0].Resource).includes("inference-profile/us.anthropic.claude-opus-4-6-v1"));
+});
+
+test("secret access is conditional and restricted to the exact supplied ARNs", () => {
+  const template = Template.fromStack(new ModelAccessStack(new App(), "Test")).toJSON();
+  for (const name of ["Decisions", "Jev"]) {
+    const resource = template.Resources[`${name}SecretRead`];
+    assert.equal(resource.Type, "AWS::IAM::Policy");
+    assert.equal(resource.Condition, `${name}SecretConfigured`);
+    assert.deepEqual(resource.Properties.PolicyDocument.Statement, [{ Effect: "Allow", Action: "secretsmanager:GetSecretValue", Resource: { Ref: `${name}SecretArn` } }]);
+  }
 });
