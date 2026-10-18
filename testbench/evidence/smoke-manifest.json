@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "mode": "smoke",
+  "pr": "https://github.com/adanjoserrojas/Pineagent/pull/23",
+  "head": "2435beb980060abe42e9649723259a9d79651425",
+  "branch": "codex/platform/harness-comparison",
+  "harnessCommit": "9076b82b5d126a314b847bd94da842c5ac34e38b",
+  "harnessTree": "d43b78512aabffd8935f4d5732dd1e17421a460f",
+  "image": "sha256:e2ca01a6134bb7ea89544679ba4d83c82e950f62bba0da5f07e0ecd313a97295",
+  "codex": "codex-cli 0.163.0",
+  "model": "gpt-6-sol",
+  "effort": "medium",
+  "corpusKind": "authored-calibration",
+  "corpusHash": "4296274ae82cd630dafc29f5adf248db40b883934a2d45836a98799a1ebcf9e8",
+  "distinctTasks": 2,
+  "repetitions": 1,
+  "seed": 42,
+  "timeoutMs": 600000,
+  "campaignTokenLimit": 0,
+  "plan": [
+    {
+      "taskId": "chunk",
+      "repetition": 0,
+      "arms": [
+        "codex",
+        "harness"
+      ]
+    },
+    {
+      "taskId": "uniqueBy",
+      "repetition": 0,
+      "arms": [
+        "harness",
+        "codex"
+      ]
+    }
+  ],
+  "startedAt": "2026-10-18T10:22:45.138Z",
+  "finishedAt": "2026-10-18T10:22:56.632Z",
+  "stopReason": null,
+  "completedTrials": 4
+}
