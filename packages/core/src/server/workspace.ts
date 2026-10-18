@@ -305,6 +305,7 @@ export class Workspace {
       // Registered in writes before any await: a container launch under freeze
       // must drain this operation. Unauthorized attempts never reach the fence.
       await this.writeFence?.(path);
+      if (!(await this.inside(full, true))) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
       const handle = await openFile(full, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
       try {
         const info = await handle.stat();
