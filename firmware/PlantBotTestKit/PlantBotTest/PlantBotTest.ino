@@ -73,6 +73,15 @@ bool needPower(const char *what) {
   return false;
 }
 
+// Throws input away until the line goes quiet, so audio from a refused SAY isn't parsed as commands.
+void drainInput() {
+  uint32_t last = millis();
+  while (millis() - last < 150) {
+    if (Serial.available()) { Serial.read(); last = millis(); }
+    else delay(1);
+  }
+}
+
 String hexColorName(uint16_t c) { char b[8]; snprintf(b, sizeof b, "0x%04X", c); return String(b); }
 uint16_t rgb565(int r, int g, int b) { return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3); }
 
@@ -337,6 +346,34 @@ void handle(String cmd) {
     ledcWriteTone(PIN_PIEZO, 0); ledcDetach(PIN_PIEZO);
     pinMode(PIN_PIEZO, OUTPUT); digitalWrite(PIN_PIEZO, LOW);
     ok("PIEZO done"); return;
+  }
+
+  // SAY n: n bytes of 16-bit little-endian mono PCM at SAMPLE_RATE follow the line, sent by the web app
+  // (speech recorded with Polly). The bytes are always read, even when refusing, so the next line parses.
+  // SAY 0 only reports that this firmware can speak.
+  if (w[0] == "SAY") {
+    const long SAY_MAX_BYTES = 10L * SAMPLE_RATE * 2;  // 10 s
+    long n = w[1].toInt();
+    if (n == 0) { ok("SAY ready rate=" + String(SAMPLE_RATE)); return; }
+    if (n < 0 || n > SAY_MAX_BYTES || (n & 1)) { drainInput(); err("SAY needs an even byte count up to " + String(SAY_MAX_BYTES)); return; }
+    int16_t *pcm = (int16_t *)ps_malloc(n);
+    size_t got = pcm ? Serial.readBytes((char *)pcm, n) : 0;
+    if (!pcm) { drainInput(); err("Could not allocate the speech buffer in PSRAM"); return; }
+    if (got != (size_t)n) { free(pcm); drainInput(); err("SAY got " + String(got) + " of " + String(n) + " bytes"); return; }
+    if (!needPower("The amp")) { free(pcm); return; }
+    if (!audioBegin()) { free(pcm); err("I2S failed to start"); return; }
+    uint32_t t0 = millis();
+    size_t frames = n / 2;
+    int16_t out[512];
+    for (size_t i = 0; i < frames;) {
+      int k = 0;
+      for (; k < 256 && i < frames; k++, i++) out[2 * k] = out[2 * k + 1] = pcm[i];
+      i2s.write((uint8_t *)out, k * 4);
+    }
+    memset(out, 0, sizeof out);
+    i2s.write((uint8_t *)out, sizeof out); // flush with silence
+    free(pcm);
+    ok("SAY played " + String(frames * 1000 / SAMPLE_RATE) + " ms in " + String(millis() - t0) + " ms"); return;
   }
 
   if (w[0] == "HELP") {
