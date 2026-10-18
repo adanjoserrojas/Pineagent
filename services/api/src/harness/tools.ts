@@ -7,6 +7,7 @@ import { taskTerms } from "../../../../harness/dist/src/sandbox-tools.js";
 type Snapshot = { content: string; version: number };
 export type EvidenceVersions = Map<string, Snapshot>;
 const TEXT = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".json", ".md"]);
+const PYTHON_TEXT = new Set([".py", ".toml", ".txt", ".ini", ".cfg", ".json", ".md"]);
 
 /** Backend authority adapter. No direct filesystem mutation or host processes. */
 export class BackendTools implements ToolRuntime {
@@ -15,6 +16,7 @@ export class BackendTools implements ToolRuntime {
   readonly observations: EvidenceVersions;
   constructor(private readonly options: {
     ws: Workspace; ownerId: string; runId: string; allowedWrites: string[];
+    validator?: "node" | "python";
     files(): Promise<string[]>;
     runTests(testPath?: string | null): Promise<TestResult>;
     changed(path: string, version: number, ops: Op[], author: string): void;
@@ -44,7 +46,8 @@ export class BackendTools implements ToolRuntime {
   listFiles(): Promise<string[]> {
     return this.record("list_files", {}, async () => {
       const files = (await this.options.files()).filter(path => this.options.ws.resolvePath(path)
-        && !path.split("/").includes("node_modules"));
+        && !path.split("/").some(part => (this.options.validator === "python"
+          ? ["node_modules", ".venv", "venv", "__pycache__", "site-packages"] : ["node_modules"]).includes(part)));
       if (files.length > 4000) throw new Error("Repository exceeds bounded discovery limit");
       return [...new Set(files)].sort();
     });
@@ -67,7 +70,7 @@ export class BackendTools implements ToolRuntime {
       const terms = Array.isArray(query) ? query : taskTerms(query);
       const hits: { path: string; score: number }[] = [];
       for (const path of await this.listFiles()) {
-        if (!TEXT.has(extname(path).toLowerCase())) continue;
+        if (!(this.options.validator === "python" ? PYTHON_TEXT : TEXT).has(extname(path).toLowerCase())) continue;
         const text = (await this.readText(path)).toLowerCase();
         let score = 0;
         for (const term of terms) {
@@ -111,15 +114,10 @@ export class BackendTools implements ToolRuntime {
           && l.holder === this.options.ownerId && l.holderType === "run");
         if (!lock) throw new Error("Run no longer owns its write set");
       }
-      await this.assertFresh();
-      for (const file of files) {
-        const seen = this.observations.get(file.path)!;
-        const ops = [{ offset: 0, length: seen.content.length, text: file.content }];
-        const result = await this.options.ws.applyOps(file.path, this.options.ownerId, seen.version, ops, this.options.runId);
-        if (!result.ok) throw new Error(`Workspace rejected patch: ${result.code}`);
-        this.observations.set(file.path, { content: file.content, version: result.version });
-        this.options.changed(file.path, result.version, ops, `agent-run/${this.options.runId}`);
-      }
+      await this.options.ws.applyRunPatch(this.options.ownerId, this.options.runId, this.observations, files, (path, version, ops) => {
+        this.observations.set(path, { content: files.find(file => file.path === path)!.content, version });
+        this.options.changed(path, version, ops, `agent-run/${this.options.runId}`);
+      });
       return files.map(file => file.path);
     });
   }

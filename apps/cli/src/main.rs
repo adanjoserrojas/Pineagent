@@ -1,3 +1,4 @@
+mod relay;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use pineagent_cli::{
     State, command,
@@ -20,6 +21,16 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
+    // The browser bridge runs in a networkless container. It emits a typed
+    // request for the authenticated gateway; no tokens or shell are involved.
+    if args.len() == 2 && args[0] == "--browser-command" {
+        let request = command(&args[1])?;
+        println!(
+            "{}",
+            serde_json::json!({"event": request.event, "body": request.body})
+        );
+        return Ok(());
+    }
     if args.iter().any(|s| s == "--help" || s == "-h") {
         println!(
             "Pineagent workspace CLI\nEnvironment: PINEAGENT_URL (HTTPS), PINEAGENT_WORKSPACE, PINEAGENT_BRANCH, PINEAGENT_TOKEN_FILE\nRun with no arguments for the terminal UI. --check verifies login and lists runs.\n--command 'run TASK' sends one command and exits. No AWS/model credentials are used."
@@ -44,7 +55,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|_| "Set PINEAGENT_TOKEN_FILE to your private backend session-token file")?;
     let token = fs::read_to_string(token_file).map_err(|_| "Cannot read session token file")?;
     let config = Config {
-        endpoint: env::var("PINEAGENT_URL").map_err(|_| "Set PINEAGENT_URL")?,
+        endpoint: match env::var("PINEAGENT_RELAY_SOCKET") {
+            Ok(path) => relay::endpoint(&path)?,
+            Err(_) => env::var("PINEAGENT_URL").map_err(|_| "Set PINEAGENT_URL")?,
+        },
         workspace: workspace.clone(),
         branch: branch.clone(),
         token,

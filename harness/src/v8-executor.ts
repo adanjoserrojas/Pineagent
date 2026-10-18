@@ -1,4 +1,4 @@
-import type { HarnessTask, RecoveryLimits, Recovery, RouteDecision, WriteGate, V8ExecutionOptions, ExecutionResult, FileSnapshot, ToolRuntimeFactory } from "./types.js";
+import type { HarnessTask, RecoveryLimits, Recovery, RouteDecision, WriteGate, V8ExecutionOptions, ExecutionResult, FileSnapshot, ToolRuntimeFactory, RepositoryLanguage } from "./types.js";
 import path from "node:path";
 import { SandboxToolRuntime } from "./sandbox-tools.js";
 import { routeHistoryPriors } from "./adaptive-checkpoint.js";
@@ -19,7 +19,7 @@ function references(file: string, content: string, available: Set<string>): stri
   return [...new Set(found)];
 }
 
-export async function collectV8Recovery({ trialRoot, task, limits = V8_RECOVERY_LIMITS, runtimeFactory }: { trialRoot: string; task: HarnessTask; limits?: RecoveryLimits; runtimeFactory?: ToolRuntimeFactory }): Promise<Recovery> {
+export async function collectV8Recovery({ trialRoot, task, limits = V8_RECOVERY_LIMITS, runtimeFactory, language }: { trialRoot: string; task: HarnessTask; limits?: RecoveryLimits; runtimeFactory?: ToolRuntimeFactory; language?: RepositoryLanguage }): Promise<Recovery> {
   for (const name of ["maxFiles", "maxChars", "maxMs"] as const) {
     if (!Number.isInteger(limits[name]) || limits[name] < 1 || limits[name] > V8_RECOVERY_LIMITS[name]) {
       throw new Error(`Invalid recovery limit: ${name}`);
@@ -30,11 +30,12 @@ export async function collectV8Recovery({ trialRoot, task, limits = V8_RECOVERY_
     ?? new SandboxToolRuntime({ root: trialRoot, allowedWrites: [], outputLimit: limits.maxChars });
   const allFiles = await runtime.listFiles();
   const available = new Set(allFiles);
-  const permitted = (file: string) => file === "package.json" || /^(src|test|tests)\/.+\.(?:[cm]?js|ts|tsx|json)$/.test(file);
+  const permitted = language?.permitsRecovery ?? ((file: string) => file === "package.json" || /^(src|test|tests)\/.+\.(?:[cm]?js|ts|tsx|json)$/.test(file));
+  const isSource = language?.isSource ?? ((file: string) => file.startsWith("src/"));
   const symbols = [...task.prompt.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map(match => match[1].toLowerCase());
-  const named = allFiles.filter(file => file.startsWith("src/") && symbols.includes(path.posix.parse(file).name.toLowerCase()));
-  const queue = [...new Set([task.visibleTestPath, ...named, "package.json"].filter(Boolean))]
-    .map(file => ({ file, depth: file.startsWith("src/") ? 1 : 0 }));
+  const named = allFiles.filter(file => isSource(file) && symbols.includes(path.posix.parse(file).name.toLowerCase()));
+  const queue = [...new Set([task.visibleTestPath, ...named, ...(language?.manifests ?? ["package.json"])].filter(Boolean))]
+    .map(file => ({ file, depth: isSource(file) ? 1 : 0 }));
   const files: FileSnapshot[] = [], complete = new Set<string>(), testImports = new Set<string>();
   let chars = 0, budgetReason: string | null = null;
   while (queue.length) {
@@ -52,8 +53,8 @@ export async function collectV8Recovery({ trialRoot, task, limits = V8_RECOVERY_
     files.push(entry);
     // readFiles truncates at outputLimit; equality is conservatively incomplete.
     if (entry.content.length < runtime.outputLimit) complete.add(file);
-    const deps = references(file, entry.content, available).filter(permitted);
-    if (file === task.visibleTestPath) deps.filter(dep => dep.startsWith("src/")).forEach(dep => testImports.add(dep));
+    const deps = (language?.references ?? references)(file, entry.content, available).filter(permitted);
+    if (file === task.visibleTestPath) deps.filter(isSource).forEach(dep => testImports.add(dep));
     if (depth < 2) queue.unshift(...deps
       .filter(dep => !files.some(read => read.path === dep) && !queue.some(pending => pending.file === dep))
       .map(file => ({ file, depth: depth + 1 })));
@@ -61,7 +62,7 @@ export async function collectV8Recovery({ trialRoot, task, limits = V8_RECOVERY_
   if (performance.now() - started >= limits.maxMs) budgetReason = "time_limit";
   const reasons = [];
   if (!complete.has(task.visibleTestPath)) reasons.push("visible_test_not_fully_read");
-  if (!files.some(file => file.path.startsWith("src/") && complete.has(file.path))) reasons.push("no_complete_source");
+  if (!files.some(file => isSource(file.path) && complete.has(file.path))) reasons.push("no_complete_source");
   if ([...testImports].some(file => !complete.has(file))) reasons.push("test_entrypoint_not_fully_read");
   if (budgetReason || files.some(file => !complete.has(file.path))) reasons.push("recovery_budget_exhausted");
   const packet = files.map(file => `FILE ${file.path}\n${file.content}`).join("\n\n");
@@ -73,7 +74,7 @@ export async function collectV8Recovery({ trialRoot, task, limits = V8_RECOVERY_
 // The router itself and its frozen gate are unchanged. An uncertain choice only
 // authorizes reads; neither synthesis nor a writing fallback is reachable yet.
 export async function executeV8Dag({ trialRoot, task, router, candidates, history, synthesize, fallbackAgent,
-  limits = V8_RECOVERY_LIMITS, afterPatch = null, runtimeFactory }: V8ExecutionOptions): Promise<{ route: RouteDecision; execution: ExecutionResult }> {
+  limits = V8_RECOVERY_LIMITS, afterPatch = null, runtimeFactory, language }: V8ExecutionOptions): Promise<{ route: RouteDecision; execution: ExecutionResult }> {
   const started = performance.now();
   const routingDecisions: RouteDecision[] = [];
   const priors = routeHistoryPriors(history, task.prompt);
@@ -84,7 +85,7 @@ export async function executeV8Dag({ trialRoot, task, router, candidates, histor
     routingDecisions, recovery, writeGate, changedPaths: [], modelCalls: 0,
     wallMs: Math.round(performance.now() - started), nodeEvents: recovery?.nodeEvents ?? [] } });
   if (route.status === "awaiting_approval") {
-    recovery = await collectV8Recovery({ trialRoot, task, limits, runtimeFactory });
+    recovery = await collectV8Recovery({ trialRoot, task, limits, runtimeFactory, language });
     if (!recovery.sufficient) return pause("recovery_evidence_insufficient");
     route = await router.route({ taskId: `${task.id}:read-only-reassessment`,
       task: `${task.prompt}\nOne bounded read-only discovery pass has completed. Select the best DAG using the observed evidence below. An ambiguous answer will still pause before any write.\n${recovery.packet}`,
@@ -97,7 +98,7 @@ export async function executeV8Dag({ trialRoot, task, router, candidates, histor
   const gateError = new Error("V8 evidence requires approval before synthesis");
   let execution: ExecutionResult;
   try {
-    execution = await executeV7Dag({ trialRoot, task, candidate, history, afterPatch, runtimeFactory,
+    execution = await executeV7Dag({ trialRoot, task, candidate, history, afterPatch, runtimeFactory, language,
       fallbackAgent: fallbackAgent ? input => fallbackAgent({ ...input, evidencePacket: recovery
         ? `${input.evidencePacket}\n\nBOUNDED READ-ONLY RECOVERY\n${recovery.packet}` : input.evidencePacket }) : null,
       synthesize: async input => {
@@ -105,7 +106,9 @@ export async function executeV8Dag({ trialRoot, task, router, candidates, histor
         const extra = recovery?.packet.split(/\n\n(?=FILE )/)
           .filter(section => !input.evidence.includes(`${section.split("\n")[0]}\n`)).join("\n\n");
         const evidence = recovery ? `${input.evidence}\n\nBOUNDED READ-ONLY RECOVERY\n${extra}` : input.evidence;
-        const hasSource = /^FILE src\/[^\n]+\n[^\n]/m.test(evidence);
+        const hasSource = language
+          ? [...evidence.matchAll(/^FILE ([^\n]+)\n([^\n])/gm)].some(match => language.isSource(match[1]))
+          : /^FILE src\/[^\n]+\n[^\n]/m.test(evidence);
         const hasTest = evidence.includes(`FILE ${task.visibleTestPath}\n`);
         writeGate = { routeApproved: route.status === "selected", evidenceSufficient: hasSource && hasTest,
           recoverySufficient: recovery?.sufficient ?? null };

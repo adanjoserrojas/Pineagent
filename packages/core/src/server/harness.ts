@@ -16,6 +16,7 @@ export type HarnessContext = {
   ws: Workspace;
   roomId: string; // RunEvent.workspaceId
   files: () => Promise<string[]>; // the branch's file list, for planning
+  canWrite?: (ownerId: string) => Promise<boolean>; // repository permission, independent of browser connectivity
   events: HarnessEvents;
 };
 
@@ -25,7 +26,7 @@ export interface Harness {
   approve(runId: string, userId: string, choice: { candidateId?: unknown; none?: unknown; hint?: unknown }): RunActionAck;
   pause(runId: string, userId: string): RunActionAck;
   resume(runId: string, userId: string): RunActionAck;
-  close(): void;
+  close(): void | Promise<void>;
 }
 
 export type HarnessFactory = (ctx: HarnessContext) => Harness;

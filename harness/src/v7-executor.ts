@@ -14,22 +14,24 @@ function importsOf(file: string, content: string, available: Set<string>): strin
   return found;
 }
 
-export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fallbackAgent, history, adaptive = true, afterPatch = null, chooseExpansion = null, runtimeFactory }: DagExecutionOptions): Promise<ExecutionResult> {
+export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fallbackAgent, history, adaptive = true, afterPatch = null, chooseExpansion = null, runtimeFactory, language }: DagExecutionOptions): Promise<ExecutionResult> {
   const started = performance.now();
   const injectedRuntime = runtimeFactory?.({ root: trialRoot, allowedWrites: task.allowedWrites, outputLimit: 48000 });
   const runtime = injectedRuntime ?? new SandboxToolRuntime({ root: trialRoot, allowedWrites: task.allowedWrites, outputLimit: 48000 });
   const readText = (file: string) => injectedRuntime ? injectedRuntime.readText(file) : fs.readFile(path.join(trialRoot, file), "utf8");
   const allFiles = await runtime.listFiles(), available = new Set(allFiles);
+  const isSource = language?.isSource ?? ((file: string) => file.startsWith("src/"));
+  const dependencies = language?.references ?? importsOf;
   const ranked = await runtime.searchCode(task.prompt);
   const graph = new Map<string, string[]>();
   const contents = new Map<string, string>();
-  for (const file of allFiles.filter(f => /\.[cm]?js$/.test(f))) {
+  for (const file of allFiles.filter(language?.isGraphFile ?? (f => /\.[cm]?js$/.test(f)))) {
     const content = await readText(file);
     contents.set(file, content);
-    graph.set(file, importsOf(file, content, available));
+    graph.set(file, dependencies(file, content, available));
   }
   const explicitSymbols = [...new Set([...task.prompt.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map(m => m[1]))];
-  const symbolHits = [...contents].filter(([file]) => file.startsWith("src/"))
+  const symbolHits = [...contents].filter(([file]) => isSource(file))
     .map(([file, content]) => ({ path:file, score:explicitSymbols.filter(symbol => content.includes(symbol)).length }))
     .filter(hit => hit.score > 0).sort((a,b) => b.score-a.score || a.path.localeCompare(b.path));
   const routes: string[] = [], checkpoints: Checkpoint[] = [], checkpointDecisions: RouteDecision[] = [], files = new Map<string, string>();
@@ -38,7 +40,7 @@ export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fal
   const priors = routeHistoryPriors(history, task.prompt);
   async function collect(label: string): Promise<void> {
     routes.push(label);
-    let seeds = (symbolHits.length ? symbolHits : ranked.filter(r => r.path.startsWith("src/"))).slice(0, label === "targeted_symbol_search" ? 2 : 5).map(r => r.path);
+    let seeds = (symbolHits.length ? symbolHits : ranked.filter(r => isSource(r.path))).slice(0, label === "targeted_symbol_search" ? 2 : 5).map(r => r.path);
     if (label !== "targeted_symbol_search") seeds = [task.visibleTestPath, ...seeds];
     if (label === "failure_first_diagnosis") {
       const failing = await runtime.runTests(task.visibleTestPath);
@@ -56,7 +58,8 @@ export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fal
       for (const [file, deps] of graph) if (wanted.size < 40 && deps.some(d => wanted.has(d))) wanted.add(file);
       seeds = [...wanted];
     }
-    const ordered = [...new Set([task.visibleTestPath, ...seeds, "package.json"])].filter(Boolean);
+    const manifests = language ? language.manifests.filter(file => available.has(file)) : ["package.json"];
+    const ordered = [...new Set([task.visibleTestPath, ...seeds, ...manifests])].filter(Boolean);
     // readFiles caps each batch at 12. Explicit batches preserve the 40-file bound.
     for (let i = 0; i < Math.min(ordered.length, 40); i += 12) {
       for (const file of await runtime.readFiles(ordered.slice(i, i + 12))) files.set(file.path, file.content);
@@ -65,7 +68,7 @@ export async function executeV7Dag({ trialRoot, task, candidate, synthesize, fal
   await collect(candidate.routeLabel);
   if (adaptive) {
     for (let index = 0; index < 2; index += 1) {
-      const unresolved = [...new Set([...files].flatMap(([file, content]) => importsOf(file, content, available)).filter(f => !files.has(f)))];
+      const unresolved = [...new Set([...files].flatMap(([file, content]) => dependencies(file, content, available)).filter(f => !files.has(f)))];
       const crossFile = classifyTaskShape(task.prompt) === "cross_file_flow";
       const sufficient = unresolved.length === 0 && (!crossFile || routes.includes("repository_flow_mapping"));
       const options = ["repository_flow_mapping", "failure_first_diagnosis"].filter(r => !routes.includes(r))

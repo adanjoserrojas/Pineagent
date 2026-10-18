@@ -11,6 +11,22 @@ async function fixture() {
   return { ws: new Workspace(root, { leaseMs: 100, idleMs: 1000 }, () => now), advance: () => { now = 101; } };
 }
 
+it("rejects queued edits and claims after their credential is revoked", async () => {
+  const { ws } = await fixture();
+  ws.acquire("a.ts", "file", "alice");
+  const release = await ws.freeze("all");
+  let active = true;
+  const edit = ws.applyOps("a.ts", "alice", 1, [{ offset: 0, length: 3, text: "new" }], undefined, () => active);
+  const claim = ws.acquireSafely("b.ts", "file", "alice", () => active);
+  const rejectedEdit = expect(edit).rejects.toThrow("authorization expired");
+  const rejectedClaim = expect(claim).rejects.toThrow("authorization expired");
+  active = false;
+  release();
+  await Promise.all([rejectedEdit, rejectedClaim]);
+  expect(await ws.read("a.ts")).toEqual({ content: "old", version: 1 });
+  expect(ws.allLocks().map(lock => lock.path)).toEqual(["a.ts"]);
+});
+
 it("retains authority when a container cannot be stopped, then allows a safe retry", async () => {
   const { ws } = await fixture();
   ws.acquire("a.ts", "file", "alice");
@@ -20,6 +36,19 @@ it("retains authority when a container cannot be stopped, then allows a safe ret
   ws.setLeaseFence(async () => {});
   expect(await ws.releaseSafely("a.ts", "alice")).toMatchObject({ holder: "alice" });
   expect(ws.allLocks()).toEqual([]);
+});
+
+it("fences creation and refuses a queued create after access is revoked", async () => {
+  const { ws } = await fixture();
+  const release = await ws.freeze("all");
+  let active = true;
+  const creation = ws.create("new.ts", "file", "alice", () => active);
+  active = false; release();
+  expect(await creation).toEqual({ ok: false, code: "INVALID" });
+  expect(await ws.read("new.ts")).toBeNull();
+  ws.setLeaseFence(async () => { throw new Error("stop failed"); });
+  await expect(ws.create("new.ts", "file", "alice")).rejects.toThrow("stop failed");
+  expect(await ws.read("new.ts")).toBeNull();
 });
 
 it("never hands off an expired grant before physical revocation succeeds", async () => {

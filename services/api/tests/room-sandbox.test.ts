@@ -8,6 +8,39 @@ import { SandboxHost } from "../src/sandbox/host";
 import { BackendTools } from "../src/harness/tools";
 import { executeV8Dag, selectCandidateDags, prototypeTools } from "@pineagent/harness";
 
+it("selects pytest without a shell and fails closed on an incompatible test path", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pineagent-python-runner-"));
+  const ws = new Workspace(root, { leaseMs: 30_000, idleMs: 600_000 });
+  const commands: string[][] = [];
+  const runner = new RoomSandbox(ws, { quiesce: async () => {}, ensure: async session => {
+    expect(session.grants).toEqual([]); return "generation";
+  }, execute: async (_session, argv) => { commands.push(argv); return { code: 5, stdout: "no tests ran", stderr: "" }; } });
+  expect((await runner.runTests("alice", "py", "test_app.py", "python")).exitCode).toBe(5);
+  expect((await runner.runTests("alice", "py", null, "python")).exitCode).toBe(5);
+  expect(commands[0]).toEqual(["/opt/python/bin/python", "-I", "-B", "/opt/python/bin/pytest", "-q", "-p", "no:cacheprovider", "--basetemp=/tmp/pytest", "/workspace/test_app.py"]);
+  expect(commands[1].at(-1)).toBe("/workspace");
+  await expect(runner.runTests("alice", "py", "test/app.js", "python")).rejects.toThrow("verification language");
+  expect(commands).toHaveLength(2);
+});
+
+it.runIf(Boolean(process.env.PINEAGENT_SANDBOX_IMAGE && process.env.PINEAGENT_PTY_ROOT))("cannot shadow pytest with repository code or pass with zero tests", async () => {
+  const root = await mkdtemp(join(process.env.PINEAGENT_PTY_ROOT!, "python-shadow-"));
+  const repo = join(root, "repo");
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await writeFile(join(repo, "pytest.py"), "import sys\nsys.exit(0)\n");
+  await writeFile(join(repo, "test_failure.py"), "def test_failure():\n    assert False, 'real test executed'\n");
+  const host = new SandboxHost({ workspaceRoot: root, image: process.env.PINEAGENT_SANDBOX_IMAGE!, uid: process.getuid!() });
+  const runner = new RoomSandbox(new Workspace(repo, { leaseMs: 30_000, idleMs: 600_000 }), host);
+  try {
+    const failed = await runner.runTests("alice", "r", null, "python");
+    expect(failed.exitCode, failed.output).toBe(1);
+    expect(failed.output).toContain("real test executed");
+    await writeFile(join(repo, "test_failure.py"), "# no tests\n");
+    const empty = await runner.runTests("alice", "r", null, "python");
+    expect(empty.exitCode, empty.output).toBe(5);
+  } finally { await host.close(); }
+}, 60_000);
+
 it("runs verification read-only behind the workspace barrier and releases it after errors", async () => {
   const root = await mkdtemp(join(tmpdir(), "pineagent-room-sandbox-"));
   await writeFile(join(root, "value.mjs"), "old");

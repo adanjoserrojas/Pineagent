@@ -82,7 +82,8 @@ export class Workspace {
     } finally { this.changingLease = false; release(); }
   }
 
-  async acquireSafely(path: string, kind: Lock["kind"], userId: string): Promise<AcquireResult> {
+  async acquireSafely(path: string, kind: Lock["kind"], userId: string, authorized?: () => boolean): Promise<AcquireResult> {
+    if (authorized && !authorized()) throw new Error("Lock authorization expired");
     const held = this.conflict(path, kind, userId);
     if (held) return { ok: false, code: "HELD", lock: publicLock(held) };
     const existing = this.locks.get(path);
@@ -90,13 +91,19 @@ export class Workspace {
       existing.expiresAt = this.now() + this.timing.leaseMs;
       return { ok: true, lock: publicLock(existing), created: false };
     }
-    return this.changeLease(() => this.acquire(path, kind, userId));
+    return this.changeLease(() => {
+      if (authorized && !authorized()) throw new Error("Lock authorization expired");
+      return this.acquire(path, kind, userId);
+    });
   }
 
-  releaseSafely(path: string, userId: string): Promise<Lock | null> {
+  releaseSafely(path: string, userId: string, authorized?: () => boolean): Promise<Lock | null> {
     const lock = this.locks.get(path);
     if (!lock || lock.holder !== userId || lock.holderType !== "user") return Promise.resolve(null);
-    return this.changeLease(() => this.release(path, userId));
+    return this.changeLease(() => {
+      if (authorized && !authorized()) throw new Error("Lock authorization expired");
+      return this.release(path, userId);
+    });
   }
 
   async sweepSafely(): Promise<{ lock: Lock; reason: LockChangeReason }[]> {
@@ -328,9 +335,14 @@ export class Workspace {
     return file && "content" in file ? file : null;
   }
 
-  async applyOps(path: string, userId: string, baseVersion: number, ops: Op[], runId?: string): Promise<OpsResult> {
+  async applyOps(path: string, userId: string, baseVersion: number, ops: Op[], runId?: string, authorized?: () => boolean): Promise<OpsResult> {
     while (this.gate && (this.gate.paths === "all" || this.gate.paths.has(path))) await this.gate.open;
+    return this.applyOpsInside(path, userId, baseVersion, ops, runId, authorized);
+  }
+
+  private async applyOpsInside(path: string, userId: string, baseVersion: number, ops: Op[], runId?: string, authorized?: () => boolean): Promise<OpsResult> {
     const write = (this.writes.get(path) ?? Promise.resolve()).catch(() => {}).then(async (): Promise<OpsResult> => {
+      if (authorized && !authorized()) throw new Error("Write authorization expired");
       const file = await this.read(path);
       const full = this.resolvePath(path);
       if (!file || !full || !(await this.inside(full, true))) return { ok: false, code: "NOT_HOLDER", currentVersion: file?.version ?? 0 };
@@ -359,6 +371,7 @@ export class Workspace {
           // version first. In-memory state changes only after the disk succeeds.
           await this.save(`file:${path}`, "saveFile", (s) => s.saveFile(path, file.version + 1, userId));
           await handle.close(); // Windows refuses replacement while this handle is open.
+          if (authorized && !authorized()) throw new Error("Write authorization expired");
           await rename(temporary, full);
         } finally { await rm(temporary, { force: true }); }
         // A successful disk write, not a proposed edit, advances shared memory.
@@ -375,23 +388,59 @@ export class Workspace {
     finally { if (this.writes.get(path) === completion) this.writes.delete(path); }
   }
 
+  // One authority barrier spans evidence validation and every file in a model
+  // patch. Unrelated collaborators cannot change an observed dependency midway.
+  // Disk failures can still leave a partial patch; successful files are reported
+  // immediately and are never silently rolled back over another user's work.
+  async applyRunPatch(ownerId: string, runId: string, observed: ReadonlyMap<string, FileState>,
+    files: { path: string; content: string }[], applied: (path: string, version: number, ops: Op[]) => void): Promise<void> {
+    const release = await this.freeze("all");
+    try {
+      for (const [path, expected] of observed) {
+        const actual = await this.read(path);
+        if (!actual || expected.version !== actual.version || expected.content !== actual.content) throw new Error("Evidence changed; a fresh run is required");
+      }
+      for (const file of files) {
+        const lock = this.runLock(file.path, runId);
+        if (!observed.has(file.path) || !lock || lock.holder !== ownerId) throw new Error("Run no longer owns its write set");
+      }
+      for (const file of files) {
+        const expected = observed.get(file.path)!;
+        const ops = [{ offset: 0, length: expected.content.length, text: file.content }];
+        const result = await this.applyOpsInside(file.path, ownerId, expected.version, ops, runId);
+        if (!result.ok) throw new Error(`Workspace rejected patch: ${result.code}`);
+        applied(file.path, result.version, ops);
+      }
+    } finally { release(); }
+  }
+
   // A new empty file or folder (`kind: "dir"`, any trailing "/" optional), with missing parent
   // folders made on the way. The creator counts as the file's editor, so it's theirs to commit.
-  async create(path: string, kind: "file" | "dir", userId: string): Promise<TreeCreateAck> {
+  async create(path: string, kind: "file" | "dir", userId: string, authorized?: () => boolean): Promise<TreeCreateAck> {
+    const bare = typeof path === "string" ? path.replace(/\/+$/, "") : "";
+    if (!this.resolvePath(bare) || bare.length > 400 || (authorized && !authorized())) return { ok: false, code: "INVALID" };
+    if (this.conflict(kind === "dir" ? `${bare}/` : bare, kind, userId)) return { ok: false, code: "LOCKED" };
+    const release = await this.freeze("all");
+    try { return await this.createInside(path, kind, userId, authorized); }
+    finally { release(); }
+  }
+
+  private async createInside(path: string, kind: "file" | "dir", userId: string, authorized?: () => boolean): Promise<TreeCreateAck> {
     const bare = typeof path === "string" ? path.replace(/\/+$/, "") : "";
     const segments = bare.split("/");
     const full = this.resolvePath(bare);
     if (!full || segments.some((s) => s === "" || s === "." || s === "..") || bare.length > 400) return { ok: false, code: "INVALID" };
     const name = kind === "dir" ? `${bare}/` : bare;
-    while (this.gate?.paths === "all") await this.gate.open; // a rebase is rewriting the tree
-    if (this.conflict(name, "file", userId)) return { ok: false, code: "LOCKED" };
+    if (this.conflict(name, kind, userId)) return { ok: false, code: "LOCKED" };
     // The nearest folder that already exists must really be inside the workspace (not a symlink
     // out of it), or mkdir would create folders wherever that link points.
     let existing = dirname(full);
     while (!(await stat(existing).then(() => true, () => false))) existing = dirname(existing);
-    if (existing !== this.root && !(await this.inside(existing))) return { ok: false, code: "INVALID" };
+    if (existing !== this.root && !(await this.inside(existing, true))) return { ok: false, code: "INVALID" };
     try {
+      if (authorized && !authorized()) return { ok: false, code: "INVALID" };
       await mkdir(dirname(full), { recursive: true });
+      if (authorized && !authorized()) return { ok: false, code: "INVALID" };
       if (kind === "dir") await mkdir(full);
       else await writeFile(full, "", { encoding: "utf8", flag: "wx" });
     } catch (err) {

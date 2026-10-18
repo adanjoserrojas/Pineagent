@@ -1,6 +1,6 @@
 // Server-side building blocks (Node only). The browser imports ./contracts and ./ops, never this.
 export { auth0Verifier, type Auth0Options, type User } from "./auth0";
-export { createGateway, type GatewayOptions, type JoinContext, type Room } from "./gateway";
+export { createGateway, type GatewayOptions, type JoinContext, type Room, type PtySession } from "./gateway";
 export { GitError, GitRepo, tokenEnv, type GitStatusEntry } from "./git";
 export { ChangeFeed } from "./gitChanges";
 export { GitQueue, type Author, type QueueEvents } from "./gitQueue";

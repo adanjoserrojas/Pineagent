@@ -1,19 +1,19 @@
 {
-  "revision": "V8-backend-transport-1",
-  "approval": "Owner approved optional backend adapter with frozen routing policy preserved",
+  "revision": "V8-python-language-2",
+  "approval": "Owner approved Python adapter for My_App with frozen routing policy and Crown preserved",
   "baseManifestSha256": "e8f5d00e46e94be5cb0fd1691b52c63feb611089cb82528c6665888dc0a56fb8",
   "overrides": {
     "src/types.ts": {
       "originalSha256": "13879d7bbf43aad072eca088f389160e27478e3c91bfe32535b66ee6d20ed2c6",
-      "integrationSha256": "72401dbcc74053c1808c8aa9718a09cc2e5b293b18b168381080501ebd87be50"
+      "integrationSha256": "0d636a8d7af98bec8bb42ccc297aa0836820259b77c85208abc68782e6c35ae5"
     },
     "src/v7-executor.ts": {
       "originalSha256": "8337297ca1386727e0d8e5bc246cce3974822eae979e5b624aab08c81b2b902f",
-      "integrationSha256": "7725f5cb40b1e22780d7145d55ac7543bad751cbdc96b95bf388ba3ba48da3c8"
+      "integrationSha256": "001376159e72c51764463e6236f8a91f6fbf6852f5e7b5825a1c8cdb65e258b4"
     },
     "src/v8-executor.ts": {
       "originalSha256": "e819eb533163860f229211e854c7fb7d27c4cf53e19413e7b87a705e4b853778",
-      "integrationSha256": "13c5ed5717494960bcbb3d16ae81e503e4953241ebe51c3c9bcac9a0aa947e34"
+      "integrationSha256": "dc0d4ab5d5ce3ac8f392363af3258e7c90de4a9e7e2f147e6c7f0750ac5d00b3"
     },
     "test/freeze-manifest.check.ts": {
       "originalSha256": "130c060ddbc42047ace5b9d5ae65d5eff1a5cebd1d0dcc758628ba4d23b78817",
@@ -22,6 +22,7 @@
   },
   "additions": {
     "test/backend-runtime.test.ts": "8c2aa62bd607838ba77bab486c98eb94ccba0fb81a188fc3be95e3eaf8b7e3db",
-    "docs/INTEGRATION_REVISION_1.md": "ebed0562bb562ecbc5eb07a0e9439f5b0c610113e438b74edd09bee32c891477"
+    "docs/INTEGRATION_REVISION_1.md": "ebed0562bb562ecbc5eb07a0e9439f5b0c610113e438b74edd09bee32c891477",
+    "docs/INTEGRATION_REVISION_2.md": "c98090641c325412f607efb3c2c610f08b204a97ddfdf0ef56a1cf3ee437e349"
   }
 }

@@ -23,6 +23,13 @@ import { Workspace } from "./workspace";
 export type Room = { id: string; ws: Workspace; repo: GitRepo; queue: GitQueue; harness: Harness; changes: ChangeFeed };
 
 export type JoinContext = { roomId: string; wsId: string; branch: string; user: User };
+export type PtySession = {
+  id: string; expiresAt: number;
+  read(after: number): Promise<{ data: string; offset: number; exited: boolean }>;
+  input(data: string): Promise<void>;
+  resize(cols: number, rows: number): Promise<void>;
+  close(): Promise<void>;
+};
 
 export type GatewayOptions = {
   http: HttpServer;
@@ -40,6 +47,8 @@ export type GatewayOptions = {
   harness?: HarnessFactory;
   // Installs sandbox fences before any user or run can mutate room authority.
   protect?(ws: Workspace, ctx: JoinContext): Promise<void>;
+  terminal?(ws: Workspace, ownerId: string, line: string): Promise<{ event: string; body: Record<string, unknown> }>;
+  pty?(ctx: JoinContext, size: { cols: number; rows: number }, port: number): Promise<PtySession>;
   // Where locks, versions and editors are kept so a restart can restore them. None = memory only.
   store?: Store;
   timing?: { heartbeatMs: number; leaseMs: number; idleMs: number; sweepMs: number };
@@ -47,7 +56,7 @@ export type GatewayOptions = {
   log?: (event: string, fields?: Record<string, unknown>) => void;
 };
 
-type SocketData = { user: User; room?: string; openPath: string | null; budget: { tokens: number; at: number } };
+type SocketData = { user: User; room?: string; scope?: { wsId: string; branch: string }; openPath: string | null; budget: { tokens: number; at: number } };
 type GatewaySocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
 
 // Abuse limits. A person typing produces ~10 events a second; anything far above that is a bug or worse.
@@ -79,6 +88,7 @@ export function createGateway(opts: GatewayOptions) {
   // One Room per branch: its worktree, locks, Git queue, change feed and harness. Created on the
   // first join; a failed preparation is forgotten so the next join tries again.
   const rooms = new Map<string, Promise<Room>>();
+  const terminalClosers = new Set<() => Promise<void>>();
   const roomFor = (ctx: JoinContext): Promise<Room> => {
     let r = rooms.get(ctx.roomId);
     if (!r) {
@@ -136,6 +146,7 @@ export function createGateway(opts: GatewayOptions) {
       ws,
       roomId: room,
       files: () => repo.listFiles(),
+      canWrite: async ownerId => !opts.authorize || await opts.authorize({ ...ctx, user: { id: ownerId, name: ownerId, avatarUrl: null } }).catch(() => "UNAVAILABLE") === "ok",
       events: {
         run: (e) => io.to(room).emit("run:event", e),
         lockChanged: (path, lock, reason) => io.to(room).emit("lock:changed", { path, kind: "file", lock, reason }),
@@ -194,11 +205,36 @@ export function createGateway(opts: GatewayOptions) {
 
   io.on("connection", (socket: GatewaySocket) => {
     const { user } = socket.data;
+    let terminalBusy = false;
+    let pty: PtySession | null = null, ptyOpening = false, ptyEpoch = 0;
+    let ptyAdmission: Promise<PtySession> | null = null;
+    let ptyScope: SocketData["scope"], ptyClosing: Promise<void> = Promise.resolve();
+    const stopPty = () => {
+      ptyEpoch++;
+      const previous = pty; pty = null;
+      if (previous) {
+        socket.emit("terminal:exit", { id: previous.id });
+        ptyClosing = ptyClosing.then(() => previous.close());
+      }
+      const admission = ptyAdmission;
+      if (admission) ptyClosing = ptyClosing.then(() => admission.then(session => session.close(), () => {}));
+      return ptyClosing;
+    };
+    terminalClosers.add(stopPty);
+    const validPty = (id: unknown) => pty && pty.id === id && socket.connected && active(user)
+      && socket.data.scope === ptyScope && Date.now() < pty.expiresAt ? pty : null;
+    const sizeValid = (cols: number, rows: number) => Number.isInteger(cols) && cols >= 2 && cols <= 500 && Number.isInteger(rows) && rows >= 2 && rows <= 200;
     log("socket.connected", { user: user.id });
-    const joined = async () => {
+    const joined = async (writing = false) => {
       const id = socket.data.room;
+      const scope = socket.data.scope;
       const r = id ? await existing(id)?.catch(() => null) : null;
-      return r ? { room: r.id, ...r } : null;
+      if (!active(user) || !socket.connected || socket.data.room !== id || socket.data.scope !== scope) return null;
+      if (writing && r && opts.authorize) {
+        if (!scope || await opts.authorize({ ...scope, roomId: r.id, user }).catch(() => "UNAVAILABLE") !== "ok") return null;
+      }
+      if (socket.data.room !== id || socket.data.scope !== scope) return null;
+      return r ? { room: r.id, scope, ...r } : null;
     };
 
     // Token bucket per socket: refills EVENTS_PER_SEC, holds EVENT_BURST.
@@ -221,6 +257,9 @@ export function createGateway(opts: GatewayOptions) {
       if (typeof wsId !== "string" || typeof branch !== "string" || !NAME.test(wsId) || !BRANCH.test(branch)) {
         return ack({ ok: false, code: "NOT_COLLABORATOR" });
       }
+      // GitHub repository identifiers are case-insensitive, just like prepare's
+      // disk path. One physical tree must have exactly one room authority.
+      wsId = wsId.toLowerCase();
       const room = roomName(wsId, branch);
       if (user.session && user.session.roomId !== room) return ack({ ok: false, code: "NOT_COLLABORATOR" });
       const ctx = { roomId: room, wsId, branch, user };
@@ -235,8 +274,10 @@ export function createGateway(opts: GatewayOptions) {
       } catch {
         return ack({ ok: false, code: "UNAVAILABLE" });
       }
+      await stopPty().catch(() => log("terminal.cleanup_failed"));
       if (socket.data.room && socket.data.room !== room) socket.leave(socket.data.room);
       socket.data.room = room;
+      socket.data.scope = { wsId, branch };
       await socket.join(room);
       const self: Member = { userId: user.id, name: user.name, avatarUrl: user.avatarUrl, openPath: socket.data.openPath };
       const files = await r.repo.listFiles();
@@ -270,12 +311,12 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("lock:acquire", async ({ path, kind }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       const target = kind === "dir" && typeof path === "string" && path.endsWith("/") ? path.slice(0, -1) : path;
       // Malformed requests get no ack; the client's timeout handles it.
       if (!j || (kind !== "file" && kind !== "dir") || !j.ws.resolvePath(target) || (kind === "dir" && !path.endsWith("/"))) return;
       let res;
-      try { res = await j.ws.acquireSafely(path, kind, user.id); }
+      try { res = await j.ws.acquireSafely(path, kind, user.id, () => active(user) && socket.connected && socket.data.scope === j.scope); }
       catch { log("sandbox.fence_failed", { room: j.room, operation: "acquire" }); socket.disconnect(true); return; }
       await j.ws.lockSaved(path); // written through before the ack (contract rule 5)
       if (res.ok) {
@@ -287,9 +328,9 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("lock:release", async ({ path }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       let released;
-      try { released = await j?.ws.releaseSafely(path, user.id); }
+      try { released = await j?.ws.releaseSafely(path, user.id, () => active(user) && socket.connected && socket.data.scope === j.scope); }
       catch { log("sandbox.fence_failed", { room: j?.room, operation: "release" }); socket.disconnect(true); return; }
       if (released) await j!.ws.lockSaved(path);
       ack({ ok: true });
@@ -302,7 +343,7 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("file:ops", async ({ path, baseVersion, ops }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       const sane =
         Array.isArray(ops) &&
         ops.length <= MAX_OPS_PER_BATCH &&
@@ -311,7 +352,7 @@ export function createGateway(opts: GatewayOptions) {
         return ack({ ok: false, code: "STALE", currentVersion: 0 });
       }
       let res;
-      try { res = await j.ws.applyOps(path, user.id, baseVersion, ops); }
+      try { res = await j.ws.applyOps(path, user.id, baseVersion, ops, undefined, () => active(user) && socket.connected && socket.data.scope === j.scope); }
       catch { log("workspace.write_failed", { room: j.room }); socket.disconnect(true); return; }
       ack(res);
       if (res.ok) {
@@ -322,9 +363,10 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("tree:create", async ({ path, kind }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       if (!j || (kind !== "file" && kind !== "dir")) return ack({ ok: false, code: "INVALID" });
-      const res = await j.ws.create(path, kind, user.id);
+      const res = await j.ws.create(path, kind, user.id, () => active(user) && socket.connected && socket.data.scope === j.scope)
+        .catch(() => ({ ok: false as const, code: "INVALID" as const }));
       ack(res);
       if (!res.ok) return;
       log("tree.created", { room: j.room, user: user.id, kind });
@@ -333,7 +375,7 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("run:start", async ({ task }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       ack(j ? j.harness.start({ id: user.id, name: user.name }, task) : { ok: false, code: "BAD_REQUEST" });
     });
 
@@ -365,7 +407,7 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("git:commit", async ({ paths, message, push }, ack) => {
-      const j = await joined();
+      const j = await joined(true);
       const jobId = j?.queue.enqueue(authorOf(user), paths, message, push);
       if (jobId) log("git.enqueued", { room: j!.room, user: user.id, push: push === true });
       ack(jobId ? { ok: true, jobId } : { ok: false, code: "BAD_REQUEST" });
@@ -379,11 +421,94 @@ export function createGateway(opts: GatewayOptions) {
     });
 
     socket.on("disconnect", async () => {
+      await stopPty().catch(() => log("terminal.cleanup_failed"));
+      terminalClosers.delete(stopPty);
       const room = socket.data.room;
       if (!room) return;
       // Only announce "left" when this was the user's last socket in the room (e.g. two tabs).
       const stillHere = (await io.in(room).fetchSockets()).some((s) => s.data.user.id === user.id);
       if (!stillHere) io.to(room).emit("presence:changed", { ...presenceOf(user), status: "left" });
+    });
+
+    socket.on("terminal:open", async (msg, ack) => {
+      if (!opts.pty) return ack({ ok: false, code: "NOT_AVAILABLE" });
+      if (user.session || ptyOpening || pty || !msg || !sizeValid(msg.cols, msg.rows)) return ack({ ok: false, code: "REFUSED" });
+      ptyOpening = true;
+      const epoch = ptyEpoch;
+      try {
+        await ptyClosing;
+        const j = await joined(true);
+        const address = opts.http.address();
+        if (!j?.scope || !address || typeof address === "string") throw new Error("No terminal scope");
+        if (epoch !== ptyEpoch || !socket.connected) throw new Error("Cancelled terminal admission");
+        ptyAdmission = opts.pty({ ...j.scope, roomId: j.room, user }, msg, address.port);
+        const session = await ptyAdmission;
+        ptyAdmission = null;
+        if (epoch !== ptyEpoch || !socket.connected || socket.data.scope !== j.scope || !active(user)) { await session.close(); throw new Error("Stale terminal admission"); }
+        pty = session; ptyScope = j.scope;
+        ack({ ok: true, id: session.id });
+        void (async () => {
+          let after = 0, checked = Date.now();
+          try {
+            while (validPty(session.id)) {
+              if (Date.now() - checked >= 30_000) {
+                if (!await joined(true)) break;
+                checked = Date.now();
+              }
+              const output = await session.read(after);
+              if (!validPty(session.id)) break;
+              if (output.data) await socket.timeout(5000).emitWithAck("terminal:output", { id: session.id, data: output.data });
+              after = output.offset;
+              if (output.exited) break;
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+          } catch { /* failure closes the session; never replay input */ }
+          finally { if (pty === session) await stopPty().catch(() => log("terminal.cleanup_failed")); }
+        })();
+      } catch { ack({ ok: false, code: "REFUSED" }); }
+      finally { ptyOpening = false; ptyAdmission = null; }
+    });
+    let inputBusy = false, resizeBusy = false;
+    socket.on("terminal:input", async (msg, ack) => {
+      const session = validPty(msg?.id);
+      if (!session || inputBusy || typeof msg?.data !== "string" || !msg.data.length || Buffer.byteLength(msg.data) > 8192) return ack({ ok: false });
+      inputBusy = true;
+      try { await session.input(msg.data); ack({ ok: true }); }
+      catch { ack({ ok: false }); if (pty === session) await stopPty().catch(() => log("terminal.cleanup_failed")); }
+      finally { inputBusy = false; }
+    });
+    socket.on("terminal:resize", async (msg, ack) => {
+      const session = validPty(msg?.id);
+      if (!session || resizeBusy || !sizeValid(msg.cols, msg.rows)) return ack({ ok: false });
+      resizeBusy = true;
+      try { await session.resize(msg.cols, msg.rows); ack({ ok: true }); }
+      catch { ack({ ok: false }); }
+      finally { resizeBusy = false; }
+    });
+    socket.on("terminal:close", async (msg, ack) => {
+      if (!validPty(msg?.id)) return ack({ ok: false });
+      try { await stopPty(); ack({ ok: true }); } catch { ack({ ok: false }); }
+    });
+
+    socket.on("terminal:command", async ({ line }, ack) => {
+      if (!opts.terminal) return ack({ ok: false, code: "NOT_AVAILABLE" });
+      if (terminalBusy || typeof line !== "string" || Buffer.byteLength(line) > 8000) return ack({ ok: false, code: "REFUSED" });
+      terminalBusy = true;
+      const room = socket.data.room;
+      const scope = socket.data.scope;
+      try {
+        const j = await joined();
+        if (!j || !active(user)) return ack({ ok: false, code: "REFUSED" });
+        const request = await opts.terminal(j.ws, user.id, line);
+        // Reuse authenticated browser handlers; the CLI has no direct write path.
+        const allowed = new Set(["run:start", "run:list", "run:pause", "run:resume", "run:approve", "file:snapshot", "lock:acquire", "lock:release", "git:status"]);
+        if (!allowed.has(request.event) || socket.data.room !== room || socket.data.scope !== scope || !socket.connected || !active(user)) return ack({ ok: false, code: "REFUSED" });
+        const handlers = socket.listeners(request.event as keyof ClientToServerEvents);
+        const handler = handlers[0] as unknown as (body: Record<string, unknown>, done: (result: unknown) => void) => Promise<void>;
+        if (!handler) return ack({ ok: false, code: "REFUSED" });
+        await handler(request.body, result => ack({ ok: true, result }));
+      } catch { ack({ ok: false, code: "REFUSED" }); }
+      finally { terminalBusy = false; }
     });
   });
 
@@ -397,16 +522,17 @@ export function createGateway(opts: GatewayOptions) {
     },
     close: async () => {
       clearInterval(sweeper);
+      await Promise.all([...terminalClosers].map(close => close()));
       const saving: Promise<void>[] = [];
       for (const r of rooms.values()) {
-        void r.then(
-          (room) => {
-            room.harness.close();
+        saving.push(r.then(
+          async (room) => {
+            await room.harness.close();
             room.changes.close();
-            saving.push(room.ws.saved());
+            await room.ws.saved();
           },
           () => {},
-        );
+        ));
       }
       await new Promise<void>((resolve) => io.close(() => resolve()));
       await Promise.all(saving); // let the last lock and version writes land before exiting

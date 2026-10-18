@@ -19,10 +19,12 @@ it("exposes only bounded sandbox operations and never a host command endpoint", 
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   });
   try {
+    const health = await fetch(`http://127.0.0.1:${address.port}/health`);
+    expect(await health.json()).toEqual({ ok: true, protocol: "pty-v1", terminal: false });
     expect((await post("/host/exec", { command: "id" })).status).toBe(404);
     expect((await post("/open", { workspace: "/tmp/repo", owner: "alice", grants: [42] })).status).toBe(400);
     expect(calls).toBe(0);
-    const response = await post("/open", { workspace: "/tmp/repo", owner: "alice", grants: [] });
+    const response = await post("/open", { workspace: "/tmp/repo", owner: "alice", grants: [], deadline: Date.now() + 1000 });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ name: "sandbox" });
     expect(calls).toBe(1);
@@ -41,7 +43,7 @@ it("transports operations through a private local socket without leaking supervi
   const session = { workspace: root, owner: "alice", grants: [] };
   try {
     expect(await client.ensure(session)).toBe("name");
-    expect(await client.execute(session, ["node", "--test"])).toEqual({ stdout: "pass", stderr: "", code: 0 });
+    expect(await client.execute({ ...session, generation: "name" }, ["node", "--test"])).toEqual({ stdout: "pass", stderr: "", code: 0 });
     await expect(client.quiesce(root)).rejects.toThrow("Sandbox unavailable");
   } finally { broker.closeAllConnections(); await new Promise<void>((resolve) => broker.close(() => resolve())); }
 });
