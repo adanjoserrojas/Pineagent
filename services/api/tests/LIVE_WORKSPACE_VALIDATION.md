@@ -30,8 +30,8 @@ Authenticated browser opened adanjoserrojas/My_App/main as GitHub collaborator
 - CLI `ask` launched `dc742d4e-14d3-4ed8-b960-c9531996db56`, completed, and
   correctly explained whitespace rejection using the newly edited app.py.
   Browser displayed the same run and read-only answer. No additional files changed.
-- Closed only this test terminal. My_App's two-line source refactor is deliberately
-  left uncommitted for owner review. No My_App commit/push was performed.
+- Closed only this test terminal. The temporary source refactor was restored through
+  the post-deployment Code run below. My_App is clean; no commit/push was performed.
 
 SSM inspection receipts: `eca0df70-b80e-46a8-a037-27f8a855f997` and
 `47e82836-3371-4382-bdbb-6fe9cb9546f1`, both Success, exit 0.
@@ -128,3 +128,46 @@ git diff --check                       # repository root
 
 Suggested follow-up requires an explicit design decision: expanding agent creation
 and test-authoring changes the frozen write/evidence policy, not Docker installation.
+
+## Production release and final live verification
+
+Release `2480f84a8a08` was built from the committed changes and installed with the
+existing checksum-verified installer. Its expected previous release guard matched
+`59f2b1cd5ece`; that release remains the rollback target. API and production web
+builds passed. The existing sandbox image was reused without modification.
+
+- Application archive SHA256:
+  `72e3d93af48e61dfcf72301ad6a36734d948e0d5c43aaca420af2989677a4699`.
+- Sandbox image archive SHA256:
+  `423545c0cb7aaebbaaab98604fffaeb2cb31b12365fe9076bbc90d451dbf5cd2`.
+- Installer SSM `2c754898-6bd0-4ae7-a2ca-47faf535eda9`: Success, exit 0.
+  An initial invocation (`3222d667-6820-4163-a1b0-d2e227ad4b29`) stopped at
+  `set` because the submitted shell payload had CRLF endings, before modifying
+  the host. Normalizing the payload to LF resolved it.
+- Final inspection SSM `d023accc-b50e-4d50-9ef7-aa89c18a3221`: Success,
+  exit 0; health identified the new release, all three services were active,
+  harness/terminal/interactiveTerminal were true and store errors were zero.
+
+In the authenticated production browser, editor and Agents were visible together
+at 786px viewport width. The separator changed Agents from 332px to 342px using
+the keyboard. The loaded plant source was `/faces/idle-loop.gif`, rendered at
+160x85 on the short viewport. The asset contains 96 frames and loops indefinitely.
+
+Post-release Ask `b2ef165b-3b05-4279-92fc-c597fde8dda5` completed with one real
+Opus call (3,539 ms), correctly explaining that Code cannot create the requested
+banking directory, new classes/files or tests under the current frozen policy.
+
+Post-release Code `3f34db89-b533-411d-8f79-1efa506beb57` restored only the
+temporary app.py refactor to its original title normalization. It completed with
+OpenAI routing and two successful Opus calls (6,328 ms). The full-suite Docker
+pytest execution `7b35d567431bb640706350d5f2d0f52d89a3ae46f2ed0a242e75524f8e88ab2d`
+exited 0. Server `git diff --exit-code -- app.py` succeeded and `git status --short`
+was empty; the browser showed zero changed files and zero locks. No My_App
+commit/push or fixture provider was used. Run history disappeared across the API
+restart, confirming the persistence limitation recorded in the matrix above.
+
+Work was isolated in the `pineagent-live-verification` checkout on local branch
+`codex/isolation-live-verification`, for an ordinary fast-forward push to the
+requested remote `feature/isolation-harness-sandbox`. The original checkout's
+uncommitted work was preserved. This document's final receipt update follows the
+deployed commit and does not require another deployment.
