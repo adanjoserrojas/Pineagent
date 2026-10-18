@@ -257,7 +257,7 @@ export function createGateway(opts: GatewayOptions) {
       const j = await joined();
       const target = kind === "dir" && typeof path === "string" && path.endsWith("/") ? path.slice(0, -1) : path;
       // Malformed requests get no ack; the client's timeout handles it.
-      if (!j || (kind !== "file" && kind !== "dir") || !j.ws.resolvePath(target)) return;
+      if (!j || (kind !== "file" && kind !== "dir") || !j.ws.resolvePath(target) || (kind === "dir" && !path.endsWith("/"))) return;
       const res = j.ws.acquire(path, kind, user.id);
       await j.ws.lockSaved(path); // written through before the ack (contract rule 5)
       if (res.ok) {

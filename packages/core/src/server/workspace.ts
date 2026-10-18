@@ -104,9 +104,11 @@ export class Workspace {
 
   // Repo-relative path → absolute path inside root, or null if it escapes the workspace.
   resolvePath(path: unknown): string | null {
-    if (typeof path !== "string" || path === "" || path.startsWith("/") || path.includes("\0")) return null;
-    // Git's own files are never readable or editable through the workspace.
-    if (path.split(/[\\/]/).includes(".git")) return null;
+    // Wire paths have exactly one spelling on every host. In particular, do not
+    // resolve aliases and then key locks/versions by the unnormalized input.
+    if (typeof path !== "string" || /[\\:\x00-\x1f\x7f]/.test(path)) return null;
+    const parts = path.split("/");
+    if (parts.some((p) => !p || p === "." || p === ".." || /[. ]$/.test(p) || p.toLowerCase() === ".git" || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p))) return null;
     const full = resolve(this.root, path);
     return full.startsWith(this.root + sep) ? full : null;
   }
@@ -130,6 +132,8 @@ export class Workspace {
   }
 
   acquire(path: string, kind: Lock["kind"], userId: string): AcquireResult {
+    const target = kind === "dir" && path.endsWith("/") ? path.slice(0, -1) : path;
+    if (!this.resolvePath(target) || (kind === "dir" && !path.endsWith("/"))) throw new Error("Noncanonical workspace path");
     const held = this.conflict(path, kind, userId);
     if (held) return { ok: false, code: "HELD", lock: publicLock(held) };
     const now = this.now();
@@ -252,7 +256,7 @@ export class Workspace {
     while (this.gate && (this.gate.paths === "all" || this.gate.paths.has(path))) await this.gate.open;
     if (!file) return { ok: false, code: "NOT_HOLDER", currentVersion: 0 };
     const lock = runId ? this.runLock(path, runId) : this.coveringLock(path, userId);
-    if (!lock) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
+    if (!lock || lock.holder !== userId || lock.expiresAt <= this.now()) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
     if (baseVersion !== file.version || !Array.isArray(ops)) return { ok: false, code: "STALE", currentVersion: file.version };
     const next = applyOps(file.content, ops);
     if (next === null || Buffer.byteLength(next) > MAX_FILE_BYTES) return { ok: false, code: "STALE", currentVersion: file.version };
@@ -314,9 +318,10 @@ export class Workspace {
   // the run or none is, and the first conflicting lock is returned. The owner's own editor lock
   // conflicts too; their agent waits until they let go of the file.
   acquireForRun(paths: string[], ownerId: string, runId: string): { ok: true; locks: Lock[] } | { ok: false; lock: Lock } {
+    if (!paths.every((p) => this.resolvePath(p))) throw new Error("Noncanonical workspace path");
     for (const path of paths) {
       for (const l of this.locks.values()) {
-        if (l.runId === runId) continue;
+        if (l.runId === runId && l.holder === ownerId) continue;
         const above = l.kind === "dir" && path.startsWith(l.path);
         if (l.path === path || above) return { ok: false, lock: publicLock(l) };
       }
