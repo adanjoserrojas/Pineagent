@@ -114,12 +114,14 @@ button { font: inherit; }
   .body { flex-wrap: nowrap; overflow: hidden; }
   .tree { display: flex; flex-direction: column; min-height: 0; }
   .explorer { flex: 1 1 auto; min-height: 0; }
-  .tree-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  /* relative: the rows' screen-reader labels are position: absolute, and without a positioned
+     scroll container they escape its clipping and stretch the page. */
+  .tree-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; position: relative; }
   .workspace-main { min-height: 0; }
 }
 /* Narrow screens stack the panels; the file list keeps the editor reachable below it. */
 @media (max-width: 899px) {
-  .tree-list { max-height: 45vh; overflow-y: auto; }
+  .tree-list { max-height: 45vh; overflow-y: auto; position: relative; }
 }
 .tree-row {
   display: flex; align-items: center; gap: 6px; min-height: 32px; padding-right: 8px; border-radius: 6px;
@@ -208,7 +210,7 @@ button { font: inherit; }
 /* Runs column */
 .runs {
   flex: 1 1 300px; max-width: 380px; display: flex; flex-direction: column; gap: 14px; padding: 14px;
-  border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto;
+  border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; position: relative;
 }
 .holder-action { margin-left: auto; color: #f7d2aa; text-decoration: underline; }
 

@@ -141,10 +141,11 @@ test("creates a file and a folder from the explorer, and others see them", async
 });
 
 test("a long file list scrolls inside the explorer instead of stretching the page", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 720 });
+  test.setTimeout(60_000); // creates files one by one through the UI
+  await page.setViewportSize({ width: 1280, height: 560 });
   await page.goto(home("alice"));
   await expect(row(page, "src/auth.ts")).toBeVisible();
-  for (let i = 10; i < 50; i++) {
+  for (let i = 10; i < 30; i++) {
     await page.getByRole("button", { name: "New file" }).click();
     await page.getByRole("textbox", { name: "New file path" }).fill(`many/file-${i}.ts`);
     await page.getByRole("textbox", { name: "New file path" }).press("Enter");
