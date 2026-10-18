@@ -14,7 +14,7 @@ export function validateFeaturePlan(value: unknown, files: readonly string[]): F
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid feature plan");
   const plan = value as Record<string, unknown>;
   if (!Array.isArray(plan.allowedWrites) || plan.allowedWrites.length < 1 || plan.allowedWrites.length > 12
-    || !plan.allowedWrites.every(safeFeaturePath) || new Set(plan.allowedWrites).size !== plan.allowedWrites.length
+    || !plan.allowedWrites.every(safeFeaturePath) || new Set(plan.allowedWrites.map(path => (path as string).toLowerCase())).size !== plan.allowedWrites.length
     || !safeFeaturePath(plan.visibleTestPath)) throw new Error("Invalid feature plan");
   const allowedWrites = plan.allowedWrites as string[], visibleTestPath = plan.visibleTestPath;
   if (allowedWrites.some(path => files.includes(path) && (isAcceptanceTest(path) || path === visibleTestPath)))

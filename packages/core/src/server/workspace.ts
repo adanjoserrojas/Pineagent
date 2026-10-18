@@ -1,6 +1,6 @@
 // One branch's shared state: its files, their versions, and the lock table.
 // No sockets here, so the rules can be unit-tested with a fake clock.
-import { lstat, mkdir, open as openFile, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open as openFile, readdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -422,11 +422,11 @@ export class Workspace {
   async applyRunPatch(ownerId: string, runId: string, observed: ReadonlyMap<string, FileState | null>,
     files: { path: string; content: string }[], applied: (path: string, version: number, ops: Op[]) => void): Promise<void> {
     const release = await this.freeze("all");
-    const staged: { path: string; full: string; temp: string; before: FileState | null; mode: number; content: string }[] = [];
+    const staged: { path: string; full: string; temp: string; before: FileState | null; mode: number; content: string; version: number }[] = [];
     const published: typeof staged = [];
     const directories: string[] = [];
     try {
-      if (!files.length || files.length > 12 || new Set(files.map(file => file.path)).size !== files.length) throw new Error("Invalid bounded patch");
+      if (!files.length || files.length > 12 || new Set(files.map(file => file.path.toLowerCase())).size !== files.length) throw new Error("Invalid bounded patch");
       for (const [path, expected] of observed) {
         const actual = await this.observeForRun(path);
         if (expected === null ? actual !== null : !actual || expected.version !== actual.version || expected.content !== actual.content)
@@ -450,7 +450,8 @@ export class Workspace {
         }
         const mode = before ? (await lstat(full)).mode & 0o777 : 0o600;
         const temp = `${full}.pineagent-${randomUUID()}`;
-        staged.push({ path: file.path, full, temp, before, mode, content: file.content });
+        const version = Math.max(before?.version ?? 0, this.files.get(file.path)?.version ?? 0, this.restoredVersions.get(file.path) ?? 0) + 1;
+        staged.push({ path: file.path, full, temp, before, mode, content: file.content, version });
         const handle = await openFile(temp, "wx", mode);
         try { await handle.writeFile(file.content, "utf8"); await handle.sync(); await handle.chmod(mode); }
         finally { await handle.close(); }
@@ -461,6 +462,12 @@ export class Workspace {
         if (entry.before === null ? current !== null : !current || current.content !== entry.before.content || current.version !== entry.before.version)
           throw new Error("Evidence changed while staging patch");
         if (this.runLock(entry.path, runId)?.holder !== ownerId) throw new Error("Run no longer owns its write set");
+      }
+      // Reserve versions before disk publication, preserving the restart fence.
+      // A failed transaction may consume a persisted version but never reuse one.
+      for (const entry of staged) {
+        await this.save(`file:${entry.path}`, "saveFile", s => s.saveFile(entry.path, entry.version, ownerId));
+        this.restoredVersions.set(entry.path, entry.version);
       }
       try {
         for (const entry of staged) { await rename(entry.temp, entry.full); published.push(entry); }
@@ -476,10 +483,8 @@ export class Workspace {
         throw error;
       }
       for (const entry of staged) {
-        const version = (entry.before?.version ?? this.restoredVersions.get(entry.path) ?? 0) + 1;
-        this.files.set(entry.path, { content: entry.content, version });
+        this.files.set(entry.path, { content: entry.content, version: entry.version });
         this.editors.set(entry.path, new Set([...(this.editors.get(entry.path) ?? []), ownerId]));
-        await this.save(`file:${entry.path}`, "saveFile", s => s.saveFile(entry.path, version, ownerId));
       }
       for (const entry of staged) {
         applied(entry.path, this.files.get(entry.path)!.version, [{ offset: 0, length: entry.before?.content.length ?? 0, text: entry.content }]);
@@ -489,7 +494,7 @@ export class Workspace {
         for (const entry of staged) await rm(entry.temp, { force: true });
         // Remove only empty directories created by this attempt. Never recurse.
         if (published.length !== staged.length) for (const directory of directories.reverse())
-          await import("node:fs/promises").then(fs => fs.rmdir(directory)).catch(() => {});
+          await rmdir(directory).catch(() => {});
       } finally { release(); }
     }
   }

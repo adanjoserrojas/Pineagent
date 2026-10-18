@@ -7,7 +7,7 @@ import { executeV8Dag, selectCandidateDags, prototypeTools, FROZEN_HISTORY, java
 import { BackendTools, type EvidenceVersions } from "./tools";
 import { languageForPlan } from "./python";
 import type { ModelReceipt } from "../models/bedrock";
-import { validateFeaturePlan, type FeaturePlan } from "./feature-plan";
+import { isAcceptanceTest, validateFeaturePlan, type FeaturePlan } from "./feature-plan";
 
 type Model = {
   receipts?(): ModelReceipt[];
@@ -187,10 +187,15 @@ export class LiveHarness implements Harness {
               return activeModel.patch({ ...input, allowedWrites: plan.allowedWrites, bases: bases() }, run.abort.signal); },
             fallbackAgent: async input => {
               await boundary(); this.emit(run, { codingRecovery: "warm_agent" });
-              const tools = runtime(plan.allowedWrites);
+              // Once acceptance tests exist, recovery must repair implementation,
+              // never turn the same failed check into a weaker success condition.
+              const repairWrites = plan.allowedWrites.filter(path => !(isAcceptanceTest(path) || path === plan.visibleTestPath)
+                || observations.get(path) === null);
+              const tools = runtime(repairWrites);
               await tools.assertFresh();
               providerAttempts++;
-              const patch = await activeModel.patch({ task: run.view.task, evidence: input.evidencePacket, allowedWrites: plan.allowedWrites, bases: bases() }, run.abort.signal, true);
+              const patch = await activeModel.patch({ task: run.view.task, evidence: input.evidencePacket, allowedWrites: repairWrites,
+                bases: bases().filter(file => repairWrites.includes(file.path)) }, run.abort.signal, true);
               await tools.writeFiles(patch.files);
               return { status: "patched", modelCalls: 1, usage: patch.usage };
             },

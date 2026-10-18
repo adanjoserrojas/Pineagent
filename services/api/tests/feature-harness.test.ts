@@ -32,7 +32,7 @@ const cases: FeatureFixture[] = [
       "test_pricing.py": "from app import total\ndef test_total():\n    assert total([{'price': 3, 'quantity': 2}]) == 6\n    assert total([]) == 0\n" },
     caller: "app.py", replacement: "name = 'shop'\nfrom pricing import total\n", test: "test_pricing.py" },
 ];
-async function exercise(spec: typeof cases[number], docker: boolean) {
+async function exercise(spec: typeof cases[number], docker: boolean, recover = false) {
   const parent = await mkdtemp(join(tmpdir(), "pineagent-feature-")), root = join(parent, "repo");
   await mkdir(join(root, ".git"), { recursive: true });
   for (const [path, content] of Object.entries(spec.original)) { await mkdir(join(root, path, ".."), { recursive: true }); await writeFile(join(root, path), content!); }
@@ -44,21 +44,32 @@ async function exercise(spec: typeof cases[number], docker: boolean) {
     acceptanceCriteria: ["Calculate price times quantity across every item", "An empty cart totals zero", "Preserve the existing shop name"] };
   const harness = new LiveHarness({ context: { ws, roomId: "feature", files: () => filesAt(root),
     events: { run: () => {}, lockChanged: () => {}, fileChanged: () => {} } },
-    model: () => ({ plan: async () => { plans++; return plan; }, patch: async input => {
+    model: () => ({ plan: async () => { plans++; return plan; }, patch: async (input, _signal, recovery) => {
       patches++; evidence = input.evidence;
-      return { files: [{ path: spec.caller, content: spec.replacement }, ...Object.entries(spec.additions).map(([path, content]) => ({ path, content: content! }))] };
+      if (recovery) {
+        expect(input.allowedWrites).not.toContain(spec.test);
+        expect(evidence.match(/FILE lib\/pricing.mjs\n/g)).toHaveLength(1);
+        return { files: [{ path: "lib/pricing.mjs", content: spec.additions["lib/pricing.mjs"] }] };
+      }
+      return { files: [{ path: spec.caller, content: spec.replacement }, ...Object.entries(spec.additions).map(([path, content]) => ({ path,
+        content: recover && path === "lib/pricing.mjs" ? content.replace("item.price * item.quantity", "item.price") : content }))] };
     } }),
     router: () => ({ route: async ({ candidates }) => { routes++; return { status: "selected", candidateId: candidates.find(c => c.routeLabel === "repository_flow_mapping")!.id }; } }),
     runTests: async (owner, run, path, validator) => {
       if (sandbox) return sandbox.runTests(owner, run, path, validator);
-      const result = await exec(process.execPath, ["--test"], { cwd: root, timeout: 10000 });
-      return { exitCode: 0, output: result.stdout };
+      try {
+        const result = await exec(process.execPath, ["--test"], { cwd: root, timeout: 10000 });
+        return { exitCode: 0, output: result.stdout };
+      } catch (error) {
+        const failure = error as { code?: number; stdout?: string; stderr?: string };
+        return { exitCode: failure.code ?? 1, output: `${failure.stdout ?? ""}\n${failure.stderr ?? ""}` };
+      }
     },
   });
   try {
     harness.start({ id: "alice", name: "Alice" }, "Build cart pricing: total every item's price times quantity, return zero for empty carts, and expose it through app. Preserve the shop name.");
     await expect.poll(() => harness.list()[0].state, { timeout: docker ? 45000 : 5000 }).toBe("done");
-    expect({ plans, routes, patches }).toEqual({ plans: 1, routes: 1, patches: 1 });
+    expect({ plans, routes, patches }).toEqual({ plans: 1, routes: 1, patches: recover ? 2 : 1 });
     expect(evidence).toContain("Acceptance criteria:");
     for (const [path, content] of Object.entries(spec.original)) if (path !== spec.caller) expect(await readFile(join(root, path), "utf8")).toBe(content);
     expect((await ws.read(spec.caller))?.version).toBe(Object.hasOwn(spec.original, spec.caller) ? 2 : 1);
@@ -68,6 +79,7 @@ async function exercise(spec: typeof cases[number], docker: boolean) {
 }
 it("builds and executes a multi-file Node feature with one planning and one coding call", () => exercise(cases[0], false));
 it("creates a working feature from requirements in an empty repository", () => exercise({ ...cases[0], original: {} }, false));
+it("recovery repairs implementation while retaining the new acceptance tests", () => exercise(cases[0], false, true));
 for (const spec of cases) it.runIf(Boolean(process.env.PINEAGENT_FEATURE_IMAGE))(`builds ${spec.language} features and validates them in real read-only Docker`, () => exercise(spec, true), 60000);
 
 it("rejects test weakening, missing acceptance criteria and unsafe creation plans", () => {
