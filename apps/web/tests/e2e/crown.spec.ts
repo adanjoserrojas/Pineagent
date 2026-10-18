@@ -7,7 +7,7 @@ test("Crown keeps square controls and a working desktop workspace", async ({ pag
   await page.goto(home("alice"));
   await expect(page.getByTestId("connection")).toHaveText("Connected");
   await expect(page.getByRole("heading", { name: "Good work grows here." })).toBeVisible();
-  await page.getByRole("button", { name: "Show files" }).click();
+  await page.getByRole("button", { name: "Browse files" }).click();
   await expect(page.getByRole("searchbox", { name: "Filter files" })).toBeFocused();
   await page.locator('[data-path="src/auth.ts"]').click();
   await expect(page.getByTestId("editor-status")).toContainText("Viewing");

@@ -377,7 +377,29 @@ button:not(:disabled):hover.btn-primary { background: #e4efa9; }
 .workspace-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .branch { display: inline-flex; align-items: center; gap: 7px; max-width: 220px; overflow: hidden; white-space: nowrap; }
 .branch svg { flex-shrink: 0; width: 14px; height: 14px; }
-.crown .body { display: grid; grid-template-columns: 56px 244px minmax(260px, 1fr) 332px; overflow: hidden; }
+.crown .body { display: flex; flex-wrap: nowrap; overflow: hidden; }
+.crown .workspace-rail { flex: 0 0 48px; }
+.crown .tree { flex: 0 0 var(--explorer-width); width: var(--explorer-width); }
+.crown .workspace-main { flex: 1 1 0; }
+.crown .agent-column { flex: 0 0 var(--agent-width); width: var(--agent-width); flex-direction: column; background: var(--panel); }
+.panel-controls, .workbench-toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font: 10px var(--mono); }
+.panel-controls > span { flex: 1; letter-spacing: 1px; }
+.panel-controls button, .workbench-toolbar button { border: 1px solid transparent; padding: 4px 8px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; min-height: 28px; }
+.panel-controls button { font-size: 20px; line-height: 1; }
+.panel-controls button:hover, .workbench-toolbar button:hover { background: var(--raised); color: var(--text); border-color: var(--line); }
+.activity-dock { flex: 0 0 var(--activity-height); min-height: 0; overflow: auto; background: var(--panel); }
+.activity-dock[hidden] { display: none; }
+.activity-dock .branch-activity { border-top: 0; }
+.resize-handle { flex: 0 0 6px; position: relative; touch-action: none; user-select: none; z-index: 8; background: var(--panel); outline-offset: -2px; }
+.resize-x { width: 6px; cursor: col-resize; }
+.resize-y { height: 6px; cursor: row-resize; }
+.resize-handle::after { content: ""; position: absolute; background: var(--line); }
+.resize-x::after { top: 0; bottom: 0; left: 2px; width: 1px; }
+.resize-y::after { left: 0; right: 0; top: 2px; height: 1px; }
+.resize-handle:hover::after, .resize-handle:focus-visible::after, .resize-handle[data-dragging]::after { background: var(--action); }
+@media (min-width: 901px) {
+  .crown[data-files="false"] .tree, .crown[data-agents="false"] .agent-column { display: none; }
+}
 .workspace-rail { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 0; border-right: 1px solid var(--line); background: var(--panel); }
 .workspace-rail button { width: 40px; height: 42px; display: grid; place-content: center; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
 .workspace-rail button:hover { color: var(--text); background: var(--raised); }
@@ -409,7 +431,6 @@ button:not(:disabled):hover.btn-primary { background: #e4efa9; }
 .workspace-footer svg { width: 12px; height: 12px; }
 .footer-edition { letter-spacing: 1.4px; }
 @media (max-width: 1200px) {
-  .crown .body { grid-template-columns: 48px 210px minmax(240px, 1fr) 300px; }
   .brand-edition, .who { display: none; }
   .crown .topbar { gap: 14px; }
 }
@@ -417,7 +438,8 @@ button:not(:disabled):hover.btn-primary { background: #e4efa9; }
   .crown .topbar { flex-wrap: wrap; gap: 10px 14px; min-height: 64px; padding: 10px 14px; }
   .workspace-name { max-width: 130px; }
   .crown .members { display: none; }
-  .crown .body { grid-template-columns: 48px minmax(0, 1fr); }
+  .crown .body > .resize-handle { display: none; }
+  .crown .tree, .crown .agent-column { flex: 1 1 0; width: auto; }
   .crown[data-panel="files"] .workspace-main, .crown[data-panel="files"] .agent-column,
   .crown[data-panel="editor"] .tree, .crown[data-panel="editor"] .agent-column,
   .crown[data-panel="agents"] .tree, .crown[data-panel="agents"] .workspace-main { display: none; }
@@ -427,7 +449,6 @@ button:not(:disabled):hover.btn-primary { background: #e4efa9; }
   .footer-edition { display: none !important; }
 }
 @media (max-width: 480px) {
-  .branch-activity { display: none; }
   .crown .topbar { gap: 8px 12px; }
   .brand { font-size: 17px; }
   .workspace-name { max-width: 110px; font-size: 11px; }
