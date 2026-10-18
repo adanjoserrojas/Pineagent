@@ -16,9 +16,11 @@ export function analyze(rows,{bootstrap=5000,seed=20261018}={}){
   if(!pairs.length)return {arms,pairedTrials:0,distinctTasks:0,unpairedTrials:rows.length,verdict:'No paired model evidence'};
   const random=rng(seed),cs=[...clusters.values()],draws=[];
   for(let i=0;i<bootstrap;i++){const sample=[];for(let j=0;j<cs.length;j++)sample.push(...cs[Math.floor(random()*cs.length)]);draws.push(effect(sample));}
-  const point=effect(pairs),qualityCI=cs.length>=2?interval(draws.map(d=>d.qualityDifference)):null,tokenRatioCI=cs.length>=2?interval(draws.map(d=>d.tokenRatio)):null;
+  // A degenerate empirical bootstrap cannot establish population-level quality precision.
+  const qualityVaries=new Set(cs.map(c=>effect(c).qualityDifference)).size>1;
+  const point=effect(pairs),qualityCI=cs.length>=2&&qualityVaries?interval(draws.map(d=>d.qualityDifference)):null,tokenRatioCI=cs.length>=2?interval(draws.map(d=>d.tokenRatio)):null;
   const unpairedTrials=rows.length-pairs.length*2;
   const eligible=!unpairedTrials&&rows.every(r=>r.mode==='live')&&cs.length>=100&&qualityCI&&tokenRatioCI;
   const joint=pairs.filter(p=>p.harness.passed&&p.codex.passed);
-  return {arms,pairedTrials:pairs.length,distinctTasks:cs.length,unpairedTrials,...point,qualityCI,tokenRatioCI,jointlySolvedPairs:joint.length,jointlySolvedTokenRatio:joint.length?effect(joint).tokenRatio:null,bootstrap:{replicates:bootstrap,seed,unit:'distinct task'},verdict:eligible&&qualityCI[0]>-.05&&tokenRatioCI[1]<1?'Quality-preserving token reduction under the prespecified rule':'Inconclusive or exploratory; no superiority claim',limitations:['Authored calibration fixtures do not establish real-repository performance.','Repeated attempts cluster by task.','Missing receipts prevent total token claims.']};
+  return {arms,pairedTrials:pairs.length,distinctTasks:cs.length,unpairedTrials,...point,qualityCI,tokenRatioCI,jointlySolvedPairs:joint.length,jointlySolvedTokenRatio:joint.length?effect(joint).tokenRatio:null,bootstrap:{replicates:bootstrap,seed,unit:'distinct task'},verdict:eligible&&qualityCI[0]>-.05&&tokenRatioCI[1]<1?'Quality-preserving token reduction under the prespecified rule':'Inconclusive or exploratory; no superiority claim',limitations:['Authored calibration fixtures do not establish real-repository performance.','Repeated attempts cluster by task.','Missing receipts prevent total token claims.','A constant task-level quality difference has no bootstrap quality interval; use a separately specified exact or conservative analysis.']};
 }
