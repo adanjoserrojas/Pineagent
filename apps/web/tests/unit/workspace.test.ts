@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
-import { MAX_FILE_BYTES, MemoryStore, Workspace, type RoomStore } from "@pineagent/core/server";
+import { MAX_FILE_BYTES, MAX_IMAGE_BYTES, MemoryStore, Workspace, type RoomStore } from "@pineagent/core/server";
 import { applyOps } from "@pineagent/core/ops";
 
 const FIXTURE = fileURLToPath(new URL("../../mock/fixtures/demo-repo", import.meta.url));
@@ -168,6 +168,34 @@ describe("files a real repository can contain", () => {
     expect(await ws.open("logo.png")).toEqual({ unsupported: "binary" });
     expect(await ws.open("big.json")).toEqual({ unsupported: "too_large" });
     expect(await ws.read("logo.png")).toBeNull(); // so file:ops can't touch it either
+  });
+
+  it("serves allowed image files as base64 with a mime type", async () => {
+    const res = await ws.image("images/logo.png");
+    expect(res).toMatchObject({ ok: true, mime: "image/png", bytes: expect.any(Number) });
+    if (!res.ok) return;
+    expect(Buffer.from(res.data, "base64").subarray(1, 4).toString()).toBe("PNG");
+    expect(await ws.image("images/mark.svg")).toMatchObject({ ok: true, mime: "image/svg+xml" });
+    await writeFile(join(ws.root, "UP.JPG"), Buffer.from([0xff, 0xd8, 0xff]));
+    expect(await ws.image("UP.JPG")).toMatchObject({ ok: true, mime: "image/jpeg", bytes: 3 });
+  });
+
+  it("refuses images with other extensions, oversized images, and missing files", async () => {
+    expect(await ws.image("README.md")).toEqual({ ok: false, code: "UNSUPPORTED" });
+    await writeFile(join(ws.root, "big.png"), Buffer.alloc(MAX_IMAGE_BYTES + 1));
+    expect(await ws.image("big.png")).toEqual({ ok: false, code: "TOO_LARGE" });
+    expect(await ws.image("nope.png")).toEqual({ ok: false, code: "NOT_FOUND" });
+    expect(await ws.image("images/")).toEqual({ ok: false, code: "NOT_FOUND" });
+    expect(await ws.image("../x.png")).toEqual({ ok: false, code: "NOT_FOUND" });
+  });
+
+  it("won't follow an image symlink out of the workspace", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "pineagent-outside-"));
+    await writeFile(join(outside, "secret.png"), Buffer.from([1, 2, 3]));
+    await symlink(join(outside, "secret.png"), join(ws.root, "leak.png"));
+    await symlink(outside, join(ws.root, "leakdir"));
+    expect(await ws.image("leak.png")).toEqual({ ok: false, code: "NOT_FOUND" });
+    expect(await ws.image("leakdir/secret.png")).toEqual({ ok: false, code: "NOT_FOUND" });
   });
 
   it("refuses an edit that would grow a file past the limit", async () => {

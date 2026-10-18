@@ -196,6 +196,18 @@ describe("mock handshake and room:join", () => {
     expect(await a.emitWithAck("run:start", { task: "  " })).toEqual({ ok: false, code: "BAD_REQUEST" });
   });
 
+  it("serves images over file:image only to joined clients, and refuses other files", async () => {
+    const a = client("dev:ned");
+    await connected(a);
+    expect(await a.emitWithAck("file:image", { path: "images/logo.png" })).toEqual({ ok: false, code: "NOT_FOUND" }); // not joined
+    await a.emitWithAck("room:join", { wsId: "w10", branch: "main" });
+    const res = await a.emitWithAck("file:image", { path: "images/logo.png" });
+    expect(res).toMatchObject({ ok: true, path: "images/logo.png", mime: "image/png" });
+    expect(res.ok && Buffer.from(res.data, "base64").length).toBe(res.ok && res.bytes);
+    expect(await a.emitWithAck("file:image", { path: "src/auth.ts" })).toEqual({ ok: false, code: "UNSUPPORTED" });
+    expect(await a.emitWithAck("file:image", { path: "nope.png" })).toEqual({ ok: false, code: "NOT_FOUND" });
+  });
+
   it("refuses malformed workspace and branch names", async () => {
     const a = client("dev:xia");
     await connected(a);
