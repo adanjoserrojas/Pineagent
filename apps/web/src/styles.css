@@ -93,6 +93,34 @@ button { font: inherit; }
 .create-error { color: var(--danger); }
 
 .tree-list { margin: 0; padding: 0 6px 12px; list-style: none; display: flex; flex-direction: column; gap: 1px; }
+
+/* Each panel scrolls on its own instead of the whole page growing with the file list. Wide
+   screens: the page is the window's height; the file list scrolls under the explorer header and
+   filter, the editor (Monaco scrolls itself) and the runs column scroll separately. */
+/* Always-visible scrollbars (macOS otherwise hides them until you scroll). Chrome and Safari use
+   the ::-webkit-scrollbar rules; Chrome ignores them if scrollbar-color is set, so that is Firefox only. */
+.tree-list::-webkit-scrollbar, .runs::-webkit-scrollbar, .commit-body::-webkit-scrollbar { width: 10px; }
+.editor-tabs::-webkit-scrollbar { height: 6px; }
+.tree-list::-webkit-scrollbar-thumb, .runs::-webkit-scrollbar-thumb, .commit-body::-webkit-scrollbar-thumb,
+.editor-tabs::-webkit-scrollbar-thumb { background: #3a4a41; border: 2px solid var(--panel); border-radius: 6px; }
+.tree-list::-webkit-scrollbar-thumb:hover, .runs::-webkit-scrollbar-thumb:hover, .commit-body::-webkit-scrollbar-thumb:hover { background: #50645a; }
+.tree-list::-webkit-scrollbar-track, .runs::-webkit-scrollbar-track, .commit-body::-webkit-scrollbar-track,
+.editor-tabs::-webkit-scrollbar-track { background: transparent; }
+@supports not selector(::-webkit-scrollbar) {
+  .tree-list, .runs, .commit-body, .editor-tabs { scrollbar-width: thin; scrollbar-color: #3a4a41 transparent; }
+}
+@media (min-width: 900px) {
+  .app { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+  .body { flex-wrap: nowrap; overflow: hidden; }
+  .tree { display: flex; flex-direction: column; min-height: 0; }
+  .explorer { flex: 1 1 auto; min-height: 0; }
+  .tree-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .workspace-main { min-height: 0; }
+}
+/* Narrow screens stack the panels; the file list keeps the editor reachable below it. */
+@media (max-width: 899px) {
+  .tree-list { max-height: 45vh; overflow-y: auto; }
+}
 .tree-row {
   display: flex; align-items: center; gap: 6px; min-height: 32px; padding-right: 8px; border-radius: 6px;
   cursor: pointer; color: var(--text); outline-offset: -2px;

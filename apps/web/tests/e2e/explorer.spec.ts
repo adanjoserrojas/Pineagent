@@ -139,3 +139,39 @@ test("creates a file and a folder from the explorer, and others see them", async
   await page.reload();
   await expect(row(page, "src/routes/v2/")).toBeVisible();
 });
+
+test("a long file list scrolls inside the explorer instead of stretching the page", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(home("alice"));
+  await expect(row(page, "src/auth.ts")).toBeVisible();
+  for (let i = 10; i < 50; i++) {
+    await page.getByRole("button", { name: "New file" }).click();
+    await page.getByRole("textbox", { name: "New file path" }).fill(`many/file-${i}.ts`);
+    await page.getByRole("textbox", { name: "New file path" }).press("Enter");
+    await expect(row(page, `many/file-${i}.ts`)).toBeVisible();
+  }
+  const sizes = () =>
+    page.evaluate(() => {
+      const list = document.querySelector(".tree-list")!;
+      const editor = document.querySelector(".editor-body")!.getBoundingClientRect();
+      return { page: document.documentElement.scrollHeight, view: innerHeight, list: list.scrollHeight, shown: list.clientHeight, editorBottom: editor.bottom };
+    });
+  const s = await sizes();
+  expect(s.page).toBeLessThanOrEqual(s.view); // the page itself doesn't scroll
+  expect(s.list).toBeGreaterThan(s.shown); // the file list does
+  expect(s.editorBottom).toBeLessThanOrEqual(s.view);
+
+  // Scrolling to the end shows the last file while the filter stays in place.
+  await expect(row(page, "README.md")).not.toBeInViewport();
+  await tree(page).hover();
+  await page.mouse.wheel(0, 5000);
+  await expect(row(page, "README.md")).toBeInViewport();
+  await expect(row(page, "many/")).not.toBeInViewport();
+  await expect(page.getByRole("searchbox", { name: "Filter files" })).toBeInViewport();
+
+  // On a phone the panels stack and the file list keeps its own scroll.
+  await page.setViewportSize({ width: 390, height: 800 });
+  const phone = await sizes();
+  expect(phone.shown).toBeLessThanOrEqual(800 * 0.45 + 1);
+  expect(phone.list).toBeGreaterThan(phone.shown);
+});
