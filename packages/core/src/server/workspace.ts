@@ -1,7 +1,9 @@
 // One branch's shared state: its files, their versions, and the lock table.
 // No sockets here, so the rules can be unit-tested with a fake clock.
-import { readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { readFile, realpath, stat, lstat, readdir, open as openFile, rename, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { resolve, sep, relative, join } from "node:path";
 import type { Lock, LockChangeReason, Op } from "../contracts";
 import { applyOps } from "../ops";
 import type { RoomStore } from "./store";
@@ -39,6 +41,10 @@ export class Workspace {
   private readonly saves = new Map<string, Promise<void>>();
   // Versions from before a restart, used when a file is next loaded.
   private readonly restoredVersions = new Map<string, number>();
+  private writeFence: ((path: string) => Promise<void>) | undefined;
+
+  // The sandbox host stops overlapping kernel writers before a backend edit.
+  setWriteFence(fence: (path: string) => Promise<void>): void { this.writeFence = fence; }
 
   constructor(
     readonly root: string,
@@ -175,11 +181,22 @@ export class Workspace {
 
   // A path can look inside the workspace and still be a symlink to somewhere else (a real repo
   // can contain `secrets -> /etc`), so check where it actually lands before touching it.
-  private async inside(full: string): Promise<boolean> {
+  private async inside(full: string, writing = false): Promise<boolean> {
     this.realRoot ??= realpath(this.root);
     try {
       const [root, real] = await Promise.all([this.realRoot, realpath(full)]);
-      return real.startsWith(root + sep);
+      if (!real.startsWith(root + sep) || relative(root, real).split(sep).some((p) => p.toLowerCase() === ".git")) return false;
+      if (!writing) return true; // Internal aliases remain browseable, never independent writers.
+      let cursor = root;
+      for (const part of relative(this.root, full).split(sep)) {
+        // Reject symlink/junction and case aliases rather than giving them
+        // independent locks. A physical file must have exactly one directory entry.
+        if (!(await readdir(cursor)).includes(part)) return false;
+        cursor = join(cursor, part);
+        const info = await lstat(cursor);
+        if (info.isSymbolicLink() || (info.isFile() && info.nlink !== 1)) return false;
+      }
+      return true;
     } catch {
       return false;
     }
@@ -216,31 +233,44 @@ export class Workspace {
   }
 
   async applyOps(path: string, userId: string, baseVersion: number, ops: Op[], runId?: string): Promise<OpsResult> {
-    const file = await this.read(path);
-    // Checked after the last await before mutating, so a freeze() can't slip in between.
+    await this.writeFence?.(path);
     while (this.gate && (this.gate.paths === "all" || this.gate.paths.has(path))) await this.gate.open;
-    if (!file) return { ok: false, code: "NOT_HOLDER", currentVersion: 0 };
-    const lock = runId ? this.runLock(path, runId) : this.coveringLock(path, userId);
-    if (!lock || lock.holder !== userId || lock.expiresAt <= this.now()) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
-    if (baseVersion !== file.version || !Array.isArray(ops)) return { ok: false, code: "STALE", currentVersion: file.version };
-    const next = applyOps(file.content, ops);
-    if (next === null || Buffer.byteLength(next) > MAX_FILE_BYTES) return { ok: false, code: "STALE", currentVersion: file.version };
-
-    // Update memory synchronously so the next batch sees this version, then persist before acking.
-    file.content = next;
-    file.version += 1;
-    const version = file.version;
-    lock.lastEditAt = this.now();
-    this.editors.set(path, new Set([...(this.editors.get(path) ?? []), userId]));
-    const full = this.resolvePath(path)!;
-    // The store first: if the process dies in between, the restored version is ahead of the disk,
-    // and a client holding the old version gets STALE instead of editing text it doesn't have.
-    const write = (this.writes.get(path) ?? Promise.resolve())
-      .then(() => this.save(`file:${path}`, "saveFile", (s) => s.saveFile(path, version, userId)))
-      .then(() => writeFile(full, next, "utf8"));
-    this.writes.set(path, write);
-    await write;
-    return { ok: true, version };
+    const write = (this.writes.get(path) ?? Promise.resolve()).catch(() => {}).then(async (): Promise<OpsResult> => {
+      const file = await this.read(path);
+      const full = this.resolvePath(path);
+      if (!file || !full || !(await this.inside(full, true))) return { ok: false, code: "NOT_HOLDER", currentVersion: file?.version ?? 0 };
+      const handle = await openFile(full, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const info = await handle.stat();
+        if (!info.isFile() || info.nlink !== 1) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
+        const lock = runId ? this.runLock(path, runId) : this.coveringLock(path, userId);
+        if (!lock || lock.holder !== userId || lock.expiresAt <= this.now()) return { ok: false, code: "NOT_HOLDER", currentVersion: file.version };
+        if (baseVersion !== file.version || !Array.isArray(ops)) return { ok: false, code: "STALE", currentVersion: file.version };
+        const next = applyOps(file.content, ops);
+        if (next === null || Buffer.byteLength(next) > MAX_FILE_BYTES) return { ok: false, code: "STALE", currentVersion: file.version };
+        const temporary = `${full}.pineagent-${randomUUID()}`;
+        try {
+          const staged = await openFile(temporary, "wx", 0o600);
+          try { await staged.writeFile(next, "utf8"); await staged.sync(); await staged.chmod(info.mode & 0o666); }
+          finally { await staged.close(); }
+          // Preserve the existing restart fence: reserve the next persisted
+          // version first. In-memory state changes only after the disk succeeds.
+          await this.save(`file:${path}`, "saveFile", (s) => s.saveFile(path, file.version + 1, userId));
+          await handle.close(); // Windows refuses replacement while this handle is open.
+          await rename(temporary, full);
+        } finally { await rm(temporary, { force: true }); }
+        // A successful disk write, not a proposed edit, advances shared memory.
+        file.content = next;
+        file.version += 1;
+        lock.lastEditAt = this.now();
+        this.editors.set(path, new Set([...(this.editors.get(path) ?? []), userId]));
+        return { ok: true, version: file.version };
+      } finally { await handle.close(); }
+    });
+    const completion = write.then(() => {}, () => {});
+    this.writes.set(path, completion);
+    try { return await write; }
+    finally { if (this.writes.get(path) === completion) this.writes.delete(path); }
   }
 
   // --- Agent run locks (the harness keeps them alive, so they never expire) -------------------
