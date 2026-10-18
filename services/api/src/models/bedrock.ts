@@ -2,7 +2,7 @@ import {
   BedrockRuntimeClient, ConverseStreamCommand,
   type ConverseStreamCommandInput, type ConverseStreamCommandOutput,
 } from "@aws-sdk/client-bedrock-runtime";
-import { validateFeaturePlan, type FeaturePlan } from "../harness/feature-plan";
+import { isAcceptanceTest, validateFeaturePlan, type FeaturePlan } from "../harness/feature-plan";
 import { materializePatch, contentHash, type FileSnapshot } from "@pineagent/harness";
 
 export const OPUS_MODEL = "us.anthropic.claude-opus-4-6-v1";
@@ -12,6 +12,7 @@ const MODEL_ERRORS = {
   MODEL_INVALID_ANSWER: "Opus returned an invalid answer. No files were changed; try rephrasing your question.",
   MODEL_INVALID_JSON: "Opus returned invalid JSON; no patch authorized.",
   MODEL_INVALID_PLAN: "Opus could not produce a supported coding plan. Use Ask for questions or describe a concrete code change; no patch authorized.",
+  MODEL_PLAN_TEST_WRITE: "The model tried to modify an existing test. Request source changes and, if needed, a separate new test file. Existing tests stay protected; no patch authorized.",
   MODEL_INVALID_PATCH: "Opus returned an invalid file replacement; no patch authorized.",
   MODEL_PATCH_SCOPE: "Opus proposed files outside the approved write set; no patch authorized.",
   MODEL_INCOMPLETE: "Opus stopped before completing its response; no patch authorized.",
@@ -70,7 +71,14 @@ export class OpusRun {
   receipts(): ModelReceipt[] { return structuredClone(this.ledger); }
 
   async answer(input: { task: string; evidence: string }, signal?: AbortSignal): Promise<string> {
-    const { value } = await this.generate("answer", input, signal, value => {
+    let protectedTests: string[] = [];
+    try {
+      const sample: unknown = JSON.parse(input.evidence);
+      if (object(sample) && Array.isArray(sample.files)) protectedTests = sample.files
+        .flatMap(file => object(file) && pathOK(file.path) && isAcceptanceTest(file.path) ? [file.path] : []);
+    } catch { /* Non-JSON evidence has no explicit path annotations. */ }
+    const { value } = await this.generate("answer", { ...input, protectedTests,
+      writePolicy: "The listed protectedTests are existing files and cannot be edited, appended to, or replaced, EVEN IN CODE MODE. If asked to add a function or test to one, explain this limitation and suggest a separate NEW test file. Any suggested filename must be absent from the evidence file list and have a different basename from every protectedTests entry; check your example names before answering. Never promise switching to Code will modify a protected test. Implementation belongs in source files; new coverage belongs in new test files." }, signal, value => {
       if (typeof value !== "string" || !value.trim() || value.length > 12000
         || /[\x00-\x08\x0b-\x1f\x7f]/.test(value)) throw new ModelFailure("MODEL_INVALID_ANSWER");
       return value.trim();
@@ -79,9 +87,14 @@ export class OpusRun {
   }
 
   async plan(task: string, files: string[], signal?: AbortSignal): Promise<FeaturePlan> {
-    const { value } = await this.generate("plan", { task, files }, signal, (value) => {
+    const protectedTests = files.filter(isAcceptanceTest);
+    const { value } = await this.generate("plan", { task, files, protectedTests,
+      writePolicy: "Never include a protectedTests path in allowedWrites. An existing test may be visibleTestPath only. If new behavior needs coverage, plan a separate new test file absent from files; include its path in allowedWrites and provide acceptanceCriteria. Use full repository-relative paths from files for existing sources." }, signal, (value) => {
       try { return validateFeaturePlan(value, files); }
-      catch { throw new ModelFailure("MODEL_INVALID_PLAN"); }
+      catch (error) {
+        throw new ModelFailure(error instanceof Error && error.message === "Existing verification files are immutable"
+          ? "MODEL_PLAN_TEST_WRITE" : "MODEL_INVALID_PLAN");
+      }
     });
     return value;
   }

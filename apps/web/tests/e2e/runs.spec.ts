@@ -66,6 +66,28 @@ test("Ask is the safe default and renders a read-only answer without coding cont
   await alice.screenshot({ path: "test-results/ask-mobile.png" });
 });
 
+test("only the latest own request remains visible, including after reconnect", async ({ browser }) => {
+  const alice = await joinAs(browser, "alice");
+  for (const question of ["First question", "Latest question"]) {
+    await alice.getByLabel("Ask your agent").fill(question);
+    await alice.getByRole("button", { name: "Start run", exact: true }).click();
+    await expect(card(alice)).toContainText(question);
+    await expect(card(alice).getByTestId("run-state")).toHaveText("done");
+  }
+  await expect(alice.getByRole("list", { name: "Runs", exact: true }).locator("article")).toHaveCount(1);
+  await expect(card(alice)).not.toContainText("First question");
+  const bob = await joinAs(browser, "bob");
+  await bob.getByLabel("Ask your agent").fill("A teammate's newer question");
+  await bob.getByRole("button", { name: "Start run", exact: true }).click();
+  await expect(card(bob)).toContainText("A teammate's newer question");
+  await expect(card(alice)).toContainText("Latest question");
+  await alice.reload();
+  await expect(alice.getByTestId("connection")).toHaveText("Connected");
+  await expect(alice.getByRole("list", { name: "Runs", exact: true }).locator("article")).toHaveCount(1);
+  await expect(card(alice)).toContainText("Latest question");
+  await alice.screenshot({ path: "test-results/latest-request.png" });
+});
+
 test("a run goes planning → routing → executing → done, and the plant follows", async ({ browser }) => {
   const alice = await joinAs(browser, "alice");
   await startRun(alice, "add a test for currentUser");

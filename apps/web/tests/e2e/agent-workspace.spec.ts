@@ -1,6 +1,36 @@
 import { expect, test } from "@playwright/test";
 import { home } from "./rooms";
 
+test("task view grows by drag and keyboard, persists, and keeps drafts on short screens", async ({ page }) => {
+  await page.setViewportSize({ width: 820, height: 960 });
+  await page.goto(home("alice"));
+  await expect(page.getByTestId("connection")).toHaveText("Connected");
+  await page.getByRole("button", { name: "Show agents", exact: true }).click();
+  const handle = page.getByRole("separator", { name: "Resize task view", exact: true });
+  await page.getByLabel("Ask your agent").fill("Keep the draft");
+  await handle.scrollIntoViewIfNeeded();
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + 75, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await page.locator(".run-feed").boundingBox())!.height).toBeGreaterThan(350);
+  const before = Number(await handle.getAttribute("aria-valuenow"));
+  await handle.press("ArrowDown");
+  await expect(handle).toHaveAttribute("aria-valuenow", String(before + 10));
+  await expect(page.getByLabel("Ask your agent")).toHaveValue("Keep the draft");
+  await page.setViewportSize({ width: 390, height: 600 });
+  await page.getByRole("button", { name: "Start run", exact: true }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole("button", { name: "Start run", exact: true })).toBeInViewport();
+  await expect(page.getByLabel("Ask your agent")).toHaveValue("Keep the draft");
+  await page.reload();
+  await expect(page.getByTestId("connection")).toHaveText("Connected");
+  await page.getByRole("button", { name: "Show agents", exact: true }).click();
+  await expect(handle).toHaveAttribute("aria-valuenow", String(before + 10));
+  await handle.press("Home");
+  await expect(handle).toHaveAttribute("aria-valuenow", "180");
+});
+
 test("agent workspace resizes beside the editor in a narrow desktop panel", async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 960 });
   await page.goto(home("alice"));
