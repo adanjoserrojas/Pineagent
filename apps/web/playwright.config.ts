@@ -2,8 +2,9 @@ import { defineConfig, devices } from "@playwright/test";
 
 // e2e runs its own mock and Vite on separate ports, so it never shares a room with a developer's
 // signed-in session on the default dev servers (3001 / 5173).
-const MOCK_PORT = 3101;
-const WEB_PORT = 5174;
+// E2E_MOCK_PORT / E2E_WEB_PORT let several checkouts run e2e at once.
+const MOCK_PORT = Number(process.env.E2E_MOCK_PORT ?? 3101);
+const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5174);
 
 export default defineConfig({
   testDir: "tests/e2e",

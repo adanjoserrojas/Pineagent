@@ -89,6 +89,17 @@ export class GitRepo {
     return paths.filter((p) => existsSync(join(this.dir, p))).sort();
   }
 
+  // Folders with nothing Git would track in them, as "dir/" (Git doesn't record empty folders, so
+  // listFiles can't show them). Folders that only hold ignored files count as empty too.
+  async listEmptyDirs(files?: string[]): Promise<string[]> {
+    const out = await this.run(["ls-files", "-z", "--others", "--directory", "--exclude-standard"], { GIT_OPTIONAL_LOCKS: "0" });
+    const known = files ?? (await this.listFiles());
+    return out
+      .split("\0")
+      .filter((p) => p.endsWith("/") && !known.some((f) => f.startsWith(p)))
+      .sort();
+  }
+
   // Read-only and lock-free, so it can run alongside a queued job.
   async status(): Promise<GitStatusEntry[]> {
     const out = await this.run(["status", "--porcelain=v1", "-z", "--untracked-files=all"], { GIT_OPTIONAL_LOCKS: "0" });

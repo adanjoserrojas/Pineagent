@@ -74,9 +74,10 @@ export function connectWorkspace(opts: {
   socket.on("git:changes", ({ changes }) => store.set({ changes: new Map(changes.map((c) => [c.path, c.status])) }));
   socket.on("git:result", (result) => store.set({ lastGitResult: result }));
 
-  // A rebase can add or delete files under everyone.
+  // A rebase can add or delete files under everyone; so can someone creating a file or folder.
   socket.on("tree:changed", ({ path, change, newPath }) => {
-    const tree = store.get().tree.filter((p) => p !== path);
+    // An empty folder's "dir/" entry goes once something is created inside it.
+    const tree = store.get().tree.filter((p) => p !== path && !(change === "add" && p.endsWith("/") && path.startsWith(p)));
     if (change === "add") tree.push(path);
     if (change === "rename" && newPath) tree.push(newPath);
     store.set({ tree: tree.sort() });

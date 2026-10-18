@@ -1,8 +1,8 @@
 // One branch's shared state: its files, their versions, and the lock table.
 // No sockets here, so the rules can be unit-tested with a fake clock.
-import { readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
-import type { Lock, LockChangeReason, Op } from "../contracts";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
+import type { Lock, LockChangeReason, Op, TreeCreateAck } from "../contracts";
 import { applyOps } from "../ops";
 import type { RoomStore } from "./store";
 
@@ -13,6 +13,23 @@ export type ReadResult = FileState | { unsupported: "binary" | "too_large" } | n
 
 // Bigger files aren't opened in the editor: every viewer holds the whole text.
 export const MAX_FILE_BYTES = 1_000_000;
+
+// PROPOSED image viewing: read-only, sent as base64 in one ack, so the cap is on the file size.
+export const MAX_IMAGE_BYTES = 2_000_000;
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  ico: "image/x-icon",
+  bmp: "image/bmp",
+  avif: "image/avif",
+};
+export type ImageResult =
+  | { ok: true; mime: string; data: string; bytes: number }
+  | { ok: false; code: "NOT_FOUND" | "UNSUPPORTED" | "TOO_LARGE" };
 
 export type AcquireResult = { ok: true; lock: Lock; created: boolean } | { ok: false; code: "HELD"; lock: Lock };
 export type OpsResult = { ok: true; version: number } | { ok: false; code: "NOT_HOLDER" | "STALE"; currentVersion: number };
@@ -206,6 +223,24 @@ export class Workspace {
     }
   }
 
+  // An image file's bytes for the read-only viewer. Same path safety as open(); never cached,
+  // since the viewer doesn't edit and Git operations can replace the file at any time.
+  async image(path: string): Promise<ImageResult> {
+    const full = this.resolvePath(path);
+    if (!full || !(await this.inside(full))) return { ok: false, code: "NOT_FOUND" };
+    try {
+      const info = await stat(full);
+      if (!info.isFile()) return { ok: false, code: "NOT_FOUND" };
+      const mime = IMAGE_MIME[(path.split(".").pop() ?? "").toLowerCase()];
+      if (!path.includes(".") || !mime) return { ok: false, code: "UNSUPPORTED" };
+      if (info.size > MAX_IMAGE_BYTES) return { ok: false, code: "TOO_LARGE" };
+      const bytes = await readFile(full);
+      return { ok: true, mime, data: bytes.toString("base64"), bytes: bytes.length };
+    } catch {
+      return { ok: false, code: "NOT_FOUND" };
+    }
+  }
+
   // Accepted only from the lock holder, built on the current version, with ops that fit the text.
   // With `runId`, the edit is that agent run's and must hold the run's own lock; it still counts
   // as the owner's edit for commit ownership.
@@ -241,6 +276,40 @@ export class Workspace {
     this.writes.set(path, write);
     await write;
     return { ok: true, version };
+  }
+
+  // A new empty file or folder (`kind: "dir"`, any trailing "/" optional), with missing parent
+  // folders made on the way. The creator counts as the file's editor, so it's theirs to commit.
+  async create(path: string, kind: "file" | "dir", userId: string): Promise<TreeCreateAck> {
+    const bare = typeof path === "string" ? path.replace(/\/+$/, "") : "";
+    const segments = bare.split("/");
+    const full = this.resolvePath(bare);
+    if (!full || segments.some((s) => s === "" || s === "." || s === "..") || bare.length > 400) return { ok: false, code: "INVALID" };
+    const name = kind === "dir" ? `${bare}/` : bare;
+    while (this.gate?.paths === "all") await this.gate.open; // a rebase is rewriting the tree
+    if (this.conflict(name, "file", userId)) return { ok: false, code: "LOCKED" };
+    // The nearest folder that already exists must really be inside the workspace (not a symlink
+    // out of it), or mkdir would create folders wherever that link points.
+    let existing = dirname(full);
+    while (!(await stat(existing).then(() => true, () => false))) existing = dirname(existing);
+    if (existing !== this.root && !(await this.inside(existing))) return { ok: false, code: "INVALID" };
+    try {
+      await mkdir(dirname(full), { recursive: true });
+      if (kind === "dir") await mkdir(full);
+      else await writeFile(full, "", { encoding: "utf8", flag: "wx" });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      return { ok: false, code: code === "EEXIST" || code === "ENOTDIR" ? "EXISTS" : "INVALID" };
+    }
+    if (kind === "file") {
+      // A path that held a file before (deleted, or known from before a restart) continues its
+      // version, so nobody's old snapshot matches the new empty text.
+      const version = (this.files.get(bare)?.version ?? this.restoredVersions.get(bare) ?? 0) + 1;
+      this.files.set(bare, { content: "", version });
+      this.editors.set(bare, new Set([...(this.editors.get(bare) ?? []), userId]));
+      await this.save(`file:${bare}`, "saveFile", (s) => s.saveFile(bare, version, userId));
+    }
+    return { ok: true, path: name };
   }
 
   // --- Agent run locks (the harness keeps them alive, so they never expire) -------------------

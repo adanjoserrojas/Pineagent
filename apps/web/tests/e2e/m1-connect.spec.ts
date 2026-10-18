@@ -7,7 +7,7 @@ process.env.MOCK_AVATARS = "0"; // the in-process mock below; keeps the run off 
 test("dev sign-in connects, joins the room and lists the tree", async ({ page }) => {
   await page.goto(home("alice"));
   await expect(page.getByTestId("connection")).toHaveText("Connected");
-  await expect(page.getByRole("tree", { name: "Files" }).locator('[data-path="src/auth.ts"]')).toBeVisible();
+  await expect(page.getByRole("tree", { name: "Files" }).locator('[data-path="src/"]')).toBeVisible();
   await expect(page.getByRole("list", { name: "People in this branch" }).getByRole("listitem")).toHaveCount(1);
 });
 

@@ -38,6 +38,13 @@ export type SnapshotAck =
   | { ok: false; code: "NOT_FOUND" }
   // PROPOSED: the file exists but isn't editable text (binary, or over 1 MB).
   | { ok: false; code: "UNSUPPORTED"; reason: "binary" | "too_large" };
+// PROPOSED: read-only image viewing (png, jpg, jpeg, gif, webp, svg, ico, bmp, avif; up to 2,000,000 bytes).
+export type ImageAck =
+  | { ok: true; path: string; mime: string; data: string /* base64 */; bytes: number }
+  | { ok: false; code: "NOT_FOUND" | "UNSUPPORTED" | "TOO_LARGE" };
+// A folder's path ends with "/", like a directory lock. EXISTS also covers a file standing where a
+// folder in the path would go; LOCKED = inside a folder someone else (or an agent run) holds.
+export type TreeCreateAck = { ok: true; path: string } | { ok: false; code: "EXISTS" | "INVALID" | "LOCKED" };
 export type OpsAck = { ok: true; version: number } | { ok: false; code: "NOT_HOLDER" | "STALE"; currentVersion: number };
 
 export type LockChangeReason = "acquired" | "released" | "expired" | "idle" | "revoked";
@@ -138,7 +145,9 @@ export interface ClientToServerEvents {
   "lock:release": (msg: { path: string }, ack: (res: { ok: true }) => void) => void;
   "session:heartbeat": (msg: Record<string, never>, ack: (res: HeartbeatAck) => void) => void;
   "file:snapshot": (msg: { path: string }, ack: (res: SnapshotAck) => void) => void;
+  "file:image": (msg: { path: string }, ack: (res: ImageAck) => void) => void;
   "file:ops": (msg: { path: string; baseVersion: number; ops: Op[] }, ack: (res: OpsAck) => void) => void;
+  "tree:create": (msg: { path: string; kind: "file" | "dir" }, ack: (res: TreeCreateAck) => void) => void;
   "git:status": (msg: Record<string, never>, ack: (res: GitStatusAck) => void) => void;
   "git:commit": (msg: { paths: string[]; message: string; push: boolean }, ack: (res: GitCommitAck) => void) => void;
   "run:start": (msg: { task: string }, ack: (res: RunStartAck) => void) => void;
