@@ -61,6 +61,14 @@ export interface ToolRuntime {
   runTests(testPath?: string | null): Promise<TestResult>;
 }
 export type ToolRuntimeFactory = (options: { root: string; allowedWrites: string[]; outputLimit: number }) => ToolRuntime;
+/** Integration revision 2: repository syntax only; never selects routes or authorizes writes. */
+export interface RepositoryLanguage {
+  isSource(file: string): boolean;
+  isGraphFile(file: string): boolean;
+  permitsRecovery(file: string): boolean;
+  manifests: readonly string[];
+  references(file: string, content: string, available: Set<string>): string[];
+}
 export interface Patch {
   files: FileSnapshot[]; usage?: TokenUsage; model?: string; wallMs?: number; summary?: string;
 }
@@ -95,6 +103,7 @@ export interface ExecutionResult {
   routingDecisions?: RouteDecision[]; recovery?: Recovery | null; writeGate?: WriteGate | null;
 }
 export interface DagExecutionOptions {
+  language?: RepositoryLanguage;
   runtimeFactory?: ToolRuntimeFactory;
   trialRoot: string; task: HarnessTask; candidate: DagCandidate; synthesize: Synthesize;
   fallbackAgent?: FallbackAgent | null; history?: RouteHistory; adaptive?: boolean;
@@ -102,6 +111,7 @@ export interface DagExecutionOptions {
   chooseExpansion?: ((input: { task: HarnessTask; executedRoutes: string[]; unresolved: string[]; options: ExpansionOption[] }) => Promise<RouteDecision>) | null;
 }
 export interface V8ExecutionOptions {
+  language?: RepositoryLanguage;
   runtimeFactory?: ToolRuntimeFactory;
   trialRoot: string; task: HarnessTask & { id: string }; router: Router; candidates: DagCandidate[];
   history?: RouteHistory; synthesize: Synthesize; fallbackAgent?: FallbackAgent;

@@ -6,7 +6,7 @@ import { taskTerms } from "../../../../harness/dist/src/sandbox-tools.js";
 
 type Snapshot = { content: string; version: number };
 export type EvidenceVersions = Map<string, Snapshot>;
-const TEXT = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".json", ".md"]);
+const TEXT = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".json", ".md", ".py", ".toml", ".txt", ".ini", ".cfg"]);
 
 /** Backend authority adapter. No direct filesystem mutation or host processes. */
 export class BackendTools implements ToolRuntime {
@@ -44,7 +44,7 @@ export class BackendTools implements ToolRuntime {
   listFiles(): Promise<string[]> {
     return this.record("list_files", {}, async () => {
       const files = (await this.options.files()).filter(path => this.options.ws.resolvePath(path)
-        && !path.split("/").includes("node_modules"));
+        && !path.split("/").some(part => ["node_modules", ".venv", "venv", "__pycache__", "site-packages"].includes(part)));
       if (files.length > 4000) throw new Error("Repository exceeds bounded discovery limit");
       return [...new Set(files)].sort();
     });

@@ -46,7 +46,7 @@ export async function liveRuntime(env: NodeJS.ProcessEnv, log: (event: string, f
     harness: context => new LiveHarness({ context,
       model: (ownerId, runId) => new OpusRun({ ownerId, runId, transport: transport.send }),
       router: () => createFrozenRouter({ decisionsApiKey, jevApiKey }),
-      runTests: (ownerId, runId, path) => sandbox(context.ws).runTests(ownerId, runId, path),
+      runTests: (ownerId, runId, path, validator) => sandbox(context.ws).runTests(ownerId, runId, path, validator),
       receipt: (runId, result) => log("harness.result", { runId, ...result }),
     }),
     terminal: (ws, ownerId, line) => sandbox(ws).parseCommand(ownerId, line),

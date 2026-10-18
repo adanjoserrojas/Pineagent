@@ -5,6 +5,7 @@ import type { RunActionAck, RunStartAck, RunView } from "@pineagent/core/contrac
 import { executeV8Dag, selectCandidateDags, prototypeTools, FROZEN_HISTORY,
   type Router, type RouteDecision, type Patch, type TestResult, type DagCandidate } from "@pineagent/harness";
 import { BackendTools, type EvidenceVersions } from "./tools";
+import { languageForPlan } from "./python";
 import type { ModelReceipt } from "../models/bedrock";
 
 type Model = {
@@ -15,7 +16,7 @@ type Model = {
 type Run = { view: RunView; abort: AbortController; work: Promise<void>; pause: boolean;
   choice?: string; hint?: string; rejected: number; candidates: DagCandidate[] };
 type Options = { context: HarnessContext; model(ownerId: string, runId: string): Model; router(ownerId: string, runId: string): Router;
-  runTests(ownerId: string, runId: string, path?: string | null): Promise<TestResult>;
+  runTests(ownerId: string, runId: string, path?: string | null, validator?: "node" | "python"): Promise<TestResult>;
   receipt?(runId: string, result: Record<string, unknown>): void };
 const terminal = (run: Run) => run.view.state === "done" || run.view.state === "error";
 const steps = (candidate: DagCandidate) => candidate.order.map(tool => ({ tool,
@@ -118,6 +119,7 @@ export class LiveHarness implements Harness {
     let executorModelCalls = 0;
     let model: Model | undefined;
     let observations: EvidenceVersions = new Map();
+    let validator: "node" | "python" = "node";
     const boundary = async () => {
       run.abort.signal.throwIfAborted();
       if (context.canWrite && !await context.canWrite(ownerId)) throw new Error("Repository permission revoked");
@@ -132,7 +134,7 @@ export class LiveHarness implements Harness {
     };
     const runtime = (allowedWrites: string[], outputLimit = 48_000) => new BackendTools({ ws: context.ws, ownerId, runId,
       allowedWrites, outputLimit, observations, files: context.files, boundary,
-      changed: context.events.fileChanged, runTests: path => this.options.runTests(ownerId, runId, path),
+      changed: context.events.fileChanged, runTests: path => this.options.runTests(ownerId, runId, path, validator),
       progress: event => {
         const i = run.view.steps.findIndex(step => step.tool === event.name);
         this.emit(run, { nodeIndex: i >= 0 ? i : run.view.nodeIndex });
@@ -149,6 +151,8 @@ export class LiveHarness implements Harness {
         const plan = await activeModel.plan(run.view.task, files, run.abort.signal);
         if (!plan.allowedWrites.length || plan.allowedWrites.length > 12 || plan.allowedWrites.some(p => !files.includes(p))
           || !files.includes(plan.visibleTestPath) || plan.allowedWrites.includes(plan.visibleTestPath)) throw new Error("Invalid plan");
+        const language = languageForPlan(plan);
+        validator = language ? "python" : "node";
         run.view.writeSet = [...new Set(plan.allowedWrites)];
         run.candidates = selectCandidateDags({ goalCapability: "verified_change", tools: prototypeTools });
         await this.acquire(run);
@@ -169,6 +173,7 @@ export class LiveHarness implements Harness {
             return decision;
           } };
           const result = await executeV8Dag({ trialRoot: context.ws.root,
+            language,
             task: { id: runId, prompt: run.view.task, ...plan }, candidates: run.candidates, router, history: FROZEN_HISTORY,
             runtimeFactory: ({ allowedWrites, outputLimit }) => runtime(allowedWrites, outputLimit),
             synthesize: async input => { await boundary(); await runtime([]).assertFresh();

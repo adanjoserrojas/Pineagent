@@ -26,15 +26,19 @@ export class RoomSandbox {
     }
   }
 
-  async runTests(ownerId: string, runId: string, testPath: string | null = null): Promise<TestResult> {
+  async runTests(ownerId: string, runId: string, testPath: string | null = null, validator: "node" | "python" = "node"): Promise<TestResult> {
     if (!ownerId || !runId || (testPath && !this.ws.resolvePath(testPath))) throw new Error("Invalid verification scope");
+    if (!["node", "python"].includes(validator) || (testPath && !(validator === "python" ? /\.py$/ : /\.[cm]?js$/).test(testPath))) throw new Error("Unsupported verification language");
+    const argv = validator === "python"
+      ? ["/opt/python/bin/python", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider", "--basetemp=/tmp/pytest", testPath ? `/workspace/${testPath}` : "/workspace"]
+      : ["node", "--test", ...(testPath ? [`/workspace/${testPath}`] : [])];
     // Verification must not modify the implementation or its tests. Patch
     // writes go through Workspace.applyOps, never a writable test container.
     const session = { workspace: this.ws.root, owner: `${ownerId}/run/${runId}`, grants: [] };
     const release = await this.ws.freeze("all");
     try {
       const generation = await this.service.ensure(session);
-      const result = await this.service.execute({ ...session, generation }, ["node", "--test", ...(testPath ? [`/workspace/${testPath}`] : [])], 120_000);
+      const result = await this.service.execute({ ...session, generation }, argv, 120_000);
       return { exitCode: result.code, output: `${result.stdout}\n${result.stderr}`.slice(-48_000) };
     } finally {
       try { await this.service.quiesce(this.ws.root); }
