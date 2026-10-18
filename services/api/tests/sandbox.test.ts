@@ -4,6 +4,30 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { SandboxHost, type DockerCommand } from "../src/sandbox/host";
 
+it("does not launch an abandoned queued open and rejects stale generations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pineagent-admission-"));
+  const workspace = join(root, "repo");
+  await mkdir(join(workspace, ".git"), { recursive: true });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let starts = 0;
+  const host = new SandboxHost({ workspaceRoot: root, image: `sha256:${"a".repeat(64)}`,
+    command: async args => { if (args[0] === "ps") await held; if (args[0] === "start") starts++;
+      return { stdout: "", stderr: "", code: 0 }; } });
+  const session = { workspace, owner: "alice", grants: [] };
+  const abort = new AbortController();
+  const pending = host.ensure(session, { deadline: Date.now() + 1000, signal: abort.signal });
+  const rejected = expect(pending).rejects.toThrow("admission expired");
+  abort.abort(); release(); await rejected;
+  expect(starts).toBe(0);
+  const old = await host.ensure(session);
+  const current = await host.ensure(session);
+  expect(current).not.toBe(old);
+  await expect(host.execute({ ...session, generation: old }, ["node", "--version"])).rejects.toThrow("generation expired");
+  expect((await host.execute({ ...session, generation: current }, ["node", "--version"])).code).toBe(0);
+  await host.close();
+});
+
 it("stops the old container before replacing grants, and retains it on stop failure", async () => {
   const root = await mkdtemp(join(tmpdir(), "pineagent-sandbox-"));
   const calls: string[][] = [];
@@ -41,8 +65,8 @@ it.runIf(Boolean(process.env.PINEAGENT_SANDBOX_IMAGE))("enforces real Docker mou
   const host = new SandboxHost({ workspaceRoot: root, image: process.env.PINEAGENT_SANDBOX_IMAGE! });
   const session = { workspace, owner: "alice", grants: ["mine.txt"] };
   try {
-    await host.ensure(session);
-    const probe = await host.execute(session, ["node", "-e", `
+    const generation = await host.ensure(session);
+    const probe = await host.execute({ ...session, generation }, ["node", "-e", `
       const fs=require('fs'), os=require('os');
       if(process.getuid()===0) throw Error('root');
       fs.writeFileSync('/workspace/mine.txt','owned');
@@ -62,11 +86,12 @@ it.runIf(Boolean(process.env.PINEAGENT_SANDBOX_IMAGE))("enforces real Docker mou
     `]);
     expect(probe.code, probe.stderr).toBe(0);
     expect(probe.stdout).toContain("isolated");
-    await host.ensure({ ...session, grants: [] });
+    const replacement = await host.ensure({ ...session, grants: [] });
     await writeFile(join(workspace, "mine.txt"), "revoked");
     await new Promise((r) => setTimeout(r, 100));
     expect(await readFile(join(workspace, "mine.txt"), "utf8")).toBe("revoked");
-    expect((await host.execute(session, ["node", "-e", "require('fs').writeFileSync('/workspace/mine.txt','attack')"])).code).not.toBe(0);
+    await expect(host.execute({ ...session, generation }, ["node", "-e", "throw Error('stale')"])).rejects.toThrow("generation expired");
+    expect((await host.execute({ ...session, generation: replacement }, ["node", "-e", "require('fs').writeFileSync('/workspace/mine.txt','attack')"])).code).not.toBe(0);
     expect(await readFile(join(workspace, "other.txt"), "utf8")).toBe("original");
   } finally { await host.close(); }
 }, 60_000);

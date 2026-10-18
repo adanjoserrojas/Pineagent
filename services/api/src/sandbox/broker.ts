@@ -1,5 +1,5 @@
 import { createServer, request, type IncomingMessage } from "node:http";
-import type { SandboxHost, SandboxSession, CommandResult } from "./host";
+import type { SandboxHost, SandboxSession, SandboxExecution, CommandResult } from "./host";
 
 export type SandboxService = Pick<SandboxHost, "ensure" | "execute" | "quiesce">;
 const LIMIT = 65_536;
@@ -27,6 +27,8 @@ async function body(req: IncomingMessage): Promise<unknown> {
 // is the authentication boundary; this server is never a public TCP listener.
 export function createSandboxBroker(host: SandboxService) {
   return createServer({ requestTimeout: 150_000, headersTimeout: 10_000 }, async (req, res) => {
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableFinished) abort.abort(); });
     const send = (status: number, value: unknown) => {
       res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
       res.end(JSON.stringify(value));
@@ -45,10 +47,14 @@ export function createSandboxBroker(host: SandboxService) {
       }
       const scoped = session(value);
       if (!scoped) return send(400, { error: "BAD_REQUEST" });
-      if (req.url === "/open") return send(200, { name: await host.ensure(scoped) });
+      if (req.url === "/open") {
+        if (!Number.isFinite(value.deadline)) return send(400, { error: "BAD_REQUEST" });
+        return send(200, { name: await host.ensure(scoped, { deadline: Math.min(value.deadline as number, Date.now() + 120_000), signal: abort.signal }) });
+      }
       if (!strings(value.argv) || !value.argv.length || !Number.isInteger(value.timeoutMs)
         || (value.timeoutMs as number) < 1 || (value.timeoutMs as number) > 120_000) return send(400, { error: "BAD_REQUEST" });
-      return send(200, await host.execute(scoped, value.argv, value.timeoutMs as number));
+      if (!text(value.generation)) return send(400, { error: "BAD_REQUEST" });
+      return send(200, await host.execute({ ...scoped, generation: value.generation }, value.argv, value.timeoutMs as number));
     } catch { return send(503, { error: "SANDBOX_UNAVAILABLE" }); } // no host paths, command text, or secrets
   });
 }
@@ -85,11 +91,11 @@ export class SandboxClient implements SandboxService {
     });
   }
   async ensure(session: SandboxSession): Promise<string> {
-    const response = await this.call("/open", session);
+    const response = await this.call("/open", { ...session, deadline: Date.now() + 120_000 });
     if (!record(response) || !text(response.name)) throw new Error("Invalid sandbox response");
     return response.name;
   }
-  async execute(session: SandboxSession, argv: string[], timeoutMs = 120_000): Promise<CommandResult> {
+  async execute(session: SandboxExecution, argv: string[], timeoutMs = 120_000): Promise<CommandResult> {
     const response = await this.call("/execute", { ...session, argv, timeoutMs });
     if (!record(response) || typeof response.stdout !== "string" || typeof response.stderr !== "string" || !Number.isInteger(response.code)) throw new Error("Invalid sandbox response");
     return { stdout: response.stdout, stderr: response.stderr, code: response.code as number };

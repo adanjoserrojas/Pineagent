@@ -16,8 +16,8 @@ export class RoomSandbox {
     const session = { workspace: this.ws.root, owner: `${ownerId}/run/${runId}`, grants: [] };
     const release = await this.ws.freeze("all");
     try {
-      await this.service.ensure(session);
-      const result = await this.service.execute(session, ["node", "--test", ...(testPath ? [`/workspace/${testPath}`] : [])], 120_000);
+      const generation = await this.service.ensure(session);
+      const result = await this.service.execute({ ...session, generation }, ["node", "--test", ...(testPath ? [`/workspace/${testPath}`] : [])], 120_000);
       return { exitCode: result.code, output: `${result.stdout}\n${result.stderr}`.slice(-48_000) };
     } finally {
       try { await this.service.quiesce(this.ws.root); }

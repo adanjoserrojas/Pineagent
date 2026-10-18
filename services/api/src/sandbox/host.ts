@@ -2,13 +2,15 @@
 // Only a trusted room authority supplies grants. Never expose Docker or this
 // interface to browser/CLI requests without the backend's lock/version checks.
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 export type CommandResult = { stdout: string; stderr: string; code: number };
 export type DockerCommand = (args: string[], timeoutMs?: number) => Promise<CommandResult>;
 export type SandboxSession = { workspace: string; owner: string; grants: string[] };
+export type SandboxExecution = SandboxSession & { generation: string };
+export type Admission = { deadline: number; signal?: AbortSignal };
 type Running = { workspace: string; name: string; grants: string; touched: number };
 
 export const dockerCommand: DockerCommand = (args, timeoutMs = 15_000) => new Promise((done, reject) => {
@@ -110,8 +112,12 @@ export class SandboxHost {
 
   // Must be called inside Workspace.freeze('all') by the room authority. The
   // freeze drains backend writes and quiesces old grants before a launch.
-  ensure(session: SandboxSession): Promise<string> {
+  ensure(session: SandboxSession, admission: Admission = { deadline: Date.now() + 120_000 }): Promise<string> {
+    const admitted = () => {
+      if (!Number.isFinite(admission.deadline) || Date.now() >= admission.deadline || admission.signal?.aborted) throw new Error("Sandbox admission expired");
+    };
     return this.serialize(async () => {
+      admitted();
       if (!session.owner || session.owner.length > 200) throw new Error("Invalid sandbox owner");
       const workspace = await this.workspace(session.workspace);
       const key = this.key(session);
@@ -122,7 +128,7 @@ export class SandboxHost {
       const grants = await this.grants(workspace, session.grants);
       const signature = JSON.stringify(grants);
       if (this.sessions.size >= 16) throw new Error("Sandbox session capacity reached");
-      const name = `pineagent-sandbox-${key}`;
+      const name = `pineagent-sandbox-${key}-${randomUUID()}`;
       const mountRoot = workspace.replaceAll("\\", "/");
       const args = ["create", "--name", name, "--label", "pineagent.sandbox=1", "--label", `pineagent.scope=${this.scope}`, "--init",
         "--user", `${this.uid}:${this.uid}`, "--network", "none", "--read-only",
@@ -138,24 +144,28 @@ export class SandboxHost {
         args.push("--mount", `type=bind,source=${mountRoot}/${clean},target=/workspace/${clean},bind-recursive=disabled`);
       }
       args.push("--entrypoint", "sleep", this.config.image, "1800");
+      admitted();
       await this.checked(args);
       const running = { workspace, name, grants: signature, touched: Date.now() };
       this.sessions.set(key, running);
-      try { await this.checked(["start", name]); }
+      try { admitted(); await this.checked(["start", name]); admitted(); }
       catch (error) { await this.remove(key, running); throw error; }
       return name;
     });
   }
 
-  async execute(session: SandboxSession, argv: string[], timeoutMs = 120_000): Promise<CommandResult> {
+  async execute(session: SandboxExecution, argv: string[], timeoutMs = 120_000): Promise<CommandResult> {
     if (!argv.length || argv.length > 128 || argv.some((arg) => typeof arg !== "string" || arg.includes("\0") || arg.length > 8192)) throw new Error("Invalid sandbox command");
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) throw new Error("Invalid sandbox deadline");
     const key = this.key(session);
     const running = this.sessions.get(key);
-    if (!running) throw new Error("Sandbox must be opened by the room authority");
+    if (!running || running.name !== session.generation) throw new Error("Sandbox generation expired");
     running.touched = Date.now();
     try { return await this.command(["exec", running.name, ...argv], timeoutMs); }
-    catch (error) { await this.quiesce(session.workspace); throw error; }
+    catch (error) {
+      await this.serialize(async () => { if (this.sessions.get(key) === running) await this.remove(key, running); });
+      throw error;
+    }
   }
 
   quiesce(workspace: string): Promise<void> {
