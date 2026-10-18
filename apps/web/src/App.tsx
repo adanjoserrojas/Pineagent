@@ -1,5 +1,5 @@
 import { DEV_TOOLS } from "./devtools";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSession } from "./auth/AuthGate";
 import { SessionManager } from "./editor/sessions";
 import { CommitDialog } from "./git/CommitDialog";
@@ -16,9 +16,7 @@ import { WorkspaceIcon } from "./ui/WorkspaceIcon";
 import { BranchActivity } from "./ui/BranchActivity";
 import { ResizeHandle } from "./ui/ResizeHandle";
 import { defaultLayout, useWorkspaceLayout } from "./ui/useWorkspaceLayout";
-
-// Monaco is most of the bundle; load it only once a file is opened.
-const EditorPane = lazy(() => import("./editor/EditorPane"));
+import { EditorGroups, type SplitDirection } from "./editor/EditorGroups";
 
 function apiUrl() {
   // ?api= lets e2e tests point a page at their own mock instance; dev builds only.
@@ -36,7 +34,20 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
   const store = useMemo(createWorkspaceStore, []);
   const ws = useWorkspace(store);
   const [socket, setSocket] = useState<WorkspaceSocket | null>(null);
-  const [openPath, setOpenPath] = useState<string | null>(null);
+  const [paths, setPaths] = useState<[string | null, string | null]>([null, null]);
+  const [activeEditor, setActiveEditor] = useState<0 | 1>(0);
+  const [split, setSplit] = useState<SplitDirection>(null);
+  const openPath = paths[activeEditor];
+  function openFile(path: string) {
+    setPaths((current) => activeEditor === 0 ? [path, current[1]] : [current[0], path]);
+    setPanel("editor");
+  }
+  function splitEditor(direction: Exclude<SplitDirection, null>) {
+    if (!split) setPaths((current) => [current[0], current[activeEditor]]);
+    setSplit(direction);
+    setActiveEditor(1);
+    setPanel("editor");
+  }
   const [commitOpen, setCommitOpen] = useState(false);
   const [panel, setPanel] = useState<"files" | "editor" | "agents">("files");
   const shell = useRef<HTMLDivElement>(null);
@@ -70,6 +81,19 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
   }
 
   useEffect(() => {
+    function shortcut(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey) return;
+      if (event.key === "\\" && !event.altKey) { event.preventDefault(); splitEditor("right"); }
+      else if (event.key.toLowerCase() === "b") { event.preventDefault(); togglePanel(event.altKey ? "agents" : "files"); }
+      else if (event.key.toLowerCase() === "j" && !event.altKey) {
+        event.preventDefault(); setLayout((l) => ({ ...l, activityVisible: !l.activityVisible }));
+      }
+    }
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, [split, activeEditor, layout]);
+
+  useEffect(() => {
     const s = connectWorkspace({ apiUrl: apiUrl(), wsId, branch, getToken: session.getToken, store });
     setSocket(s);
     return () => {
@@ -89,12 +113,10 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
     };
   }, [socket, store]);
 
-  // Opening a file starts (or resumes) its session; leaving it flushes edits and releases the lock.
+  // Presence follows the focused group; sessions follow the unique visible files.
   useEffect(() => {
-    if (!manager || !openPath) return;
-    manager.open(openPath);
-    return () => manager.leave(openPath);
-  }, [manager, openPath]);
+    manager?.syncOpenPaths(split ? paths : [paths[0]]);
+  }, [manager, paths, split]);
 
   // Presence is re-sent after every (re)join so other people see what this user has open.
   useEffect(() => {
@@ -171,7 +193,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
             selfId={ws.self?.userId ?? null}
             openPath={openPath}
             loading={ws.connection !== "connected"}
-            onOpen={(path) => { setOpenPath(path); setPanel("editor"); }}
+            onOpen={openFile}
           />
           <section className="branch-people" aria-label="Branch presence">
             <h2 className="section-label">In this branch <span>{ws.members.length}</span></h2>
@@ -194,21 +216,16 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
           onChange={(explorer) => setLayout((l) => ({ ...l, explorer }))} onReset={() => setLayout((l) => ({ ...l, explorer: defaultLayout.explorer }))} />}
         <main className="workspace-main" id="panel-editor" tabIndex={-1}>
           <div className="workbench-toolbar"><span>WORKSPACE</span><span className="spacer" />
+            <button type="button" aria-label="Split editor right" title="Two editors side by side" onClick={() => splitEditor("right")}>◫ <span>Split right</span></button>
+            <button type="button" aria-label="Split editor down" title="Two editors stacked" onClick={() => splitEditor("down")}>⊟ <span>Split down</span></button>
             <button type="button" aria-label="Toggle activity" aria-expanded={layout.activityVisible} onClick={() => setLayout((l) => ({ ...l, activityVisible: !l.activityVisible }))}>Activity</button>
             <button type="button" aria-label="Reset panel layout" onClick={() => setLayout(defaultLayout)}>Reset layout</button>
           </div>
-          {openPath && manager ? (
-            <Suspense fallback={<p className="editor-note">Starting editor…</p>}>
-              <EditorPane
-                manager={manager}
-                path={openPath}
-                connected={ws.connection === "connected"}
-                selfId={ws.self?.userId ?? null}
-                members={ws.members}
-                onPauseRun={(runId) => socket?.emit("run:pause", { runId }, () => {})}
-              />
-            </Suspense>
-          ) : (
+          <EditorGroups paths={paths} active={activeEditor} split={split} manager={manager}
+            connected={ws.connection === "connected"} selfId={ws.self?.userId ?? null} members={ws.members}
+            onActivate={setActiveEditor} onCloseSplit={() => { setSplit(null); setActiveEditor(0); setPaths((p) => [p[0], null]); }}
+            onPauseRun={(runId) => socket?.emit("run:pause", { runId }, () => {})}
+            welcome={
             <div className="workspace-welcome">
               <CrownMark />
               <p className="section-label">Your shared workspace</p>
@@ -216,7 +233,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
               <p>Open a file. Give your agent a task.<br />Build together, with clear ownership.</p>
               <button type="button" className="btn-secondary" onClick={() => showPanel("files")}>Browse files</button>
             </div>
-          )}
+            } />
           {layout.activityVisible && <ResizeHandle label="Resize activity" axis="y" reverse value={activityHeight} min={90} max={Math.max(90, Math.min(360, available.height * 0.4))}
             onChange={(activity) => setLayout((l) => ({ ...l, activity }))} onReset={() => setLayout((l) => ({ ...l, activity: defaultLayout.activity }))} />}
           <div className="activity-dock" hidden={!layout.activityVisible}><BranchActivity ws={ws} onCollapse={() => setLayout((l) => ({ ...l, activityVisible: false }))} /></div>

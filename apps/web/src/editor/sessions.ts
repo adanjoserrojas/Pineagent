@@ -12,6 +12,7 @@ const ACK_TIMEOUT_MS = 5000;
 // the editor tab that showed them and act as the snapshot cache.
 export class SessionManager {
   private readonly sessions = new Map<string, FileSession>();
+  private openPaths = new Set<string>();
   private readonly port: SessionPort;
   private readonly flushTimer: ReturnType<typeof setInterval>;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -81,6 +82,15 @@ export class SessionManager {
 
   leave(path: string) {
     this.sessions.get(path)?.leave();
+  }
+
+  // A file shown twice still has one session/lease. Moving focus or closing a
+  // duplicate view must not release the writer's lock.
+  syncOpenPaths(paths: readonly (string | null)[]) {
+    const next = new Set(paths.filter((path): path is string => path !== null));
+    this.openPaths.forEach((path) => { if (!next.has(path)) this.leave(path); });
+    next.forEach((path) => { if (!this.openPaths.has(path)) this.open(path); });
+    this.openPaths = next;
   }
 
   // Resolves true once every listed file's typed edits are acknowledged, false on timeout.

@@ -2,9 +2,9 @@ import { DEV_TOOLS } from "../devtools";
 import { WorkspaceIcon } from "../ui/WorkspaceIcon";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { Lock, Member, Op } from "../contracts/socket";
-import type { SessionState } from "./FileSession";
+import type { EditorSink, SessionState } from "./FileSession";
 import type { SessionManager } from "./sessions";
 import "./monacoSetup";
 
@@ -22,6 +22,7 @@ export default function EditorPane({
   selfId,
   members,
   onPauseRun,
+  paneId = "primary",
 }: {
   manager: SessionManager;
   path: string;
@@ -29,7 +30,9 @@ export default function EditorPane({
   selfId: string | null;
   members: Member[];
   onPauseRun?: (runId: string) => void;
+  paneId?: string;
 }) {
+  const lostTitleId = useId();
   const requested = manager.get(path);
   const requestedState = useSyncExternalStore(requested.subscribe, requested.getState);
   const hasText = (s: SessionState) => s.version > 0 || s.status === "missing" || s.status === "unsupported" || s.status === "error";
@@ -55,6 +58,7 @@ export default function EditorPane({
   const monacoRef = useRef<typeof Monaco | null>(null);
   const applyingRemote = useRef(false); // changes we make for the server must not echo back as typing
   const shownRef = useRef(shown);
+  const sinkRef = useRef<EditorSink | undefined>(undefined);
   const [mountId, setMountId] = useState(0);
 
   useEffect(() => {
@@ -65,7 +69,14 @@ export default function EditorPane({
     editorRef.current = editor;
     monacoRef.current = monaco;
     // e2e reads the exact buffer through this; Monaco's DOM only renders visible lines.
-    if (DEV_TOOLS) (window as unknown as { __editorText?: () => string }).__editorText = () => editor.getValue();
+    if (DEV_TOOLS) {
+      const hooks = window as unknown as { __editorText?: () => string; __editorTexts?: Record<string, () => string> };
+      const read = () => editor.getValue();
+      hooks.__editorText = read;
+      (hooks.__editorTexts ??= {})[paneId] = read;
+      editor.onDidFocusEditorText(() => { hooks.__editorText = read; });
+      editor.onDidDispose(() => { if (hooks.__editorTexts?.[paneId] === read) delete hooks.__editorTexts[paneId]; });
+    }
     editor.onDidChangeModelContent((e) => {
       if (applyingRemote.current || e.isFlush) return;
       // All offsets in one event refer to the text before the event. Applying from the end of the
@@ -73,7 +84,7 @@ export default function EditorPane({
       const ops: Op[] = [...e.changes]
         .sort((a, b) => b.rangeOffset - a.rangeOffset)
         .map((c) => ({ offset: c.rangeOffset, length: c.rangeLength, text: c.text }));
-      shownRef.current.localEdit(ops);
+      shownRef.current.localEdit(ops, sinkRef.current);
     });
     setMountId((n) => n + 1);
   };
@@ -94,7 +105,7 @@ export default function EditorPane({
     };
     const replace = (text: string) => withModel((m) => m.getValue() !== text && m.setValue(text));
     replace(shown.getState().text);
-    shown.bind({
+    const sink: EditorSink = {
       replace,
       apply: (ops) =>
         withModel((m) => {
@@ -104,8 +115,10 @@ export default function EditorPane({
             m.applyEdits([{ range: new monaco.Range(s.lineNumber, s.column, e.lineNumber, e.column), text: op.text }]);
           }
         }),
-    });
-    return () => shown.bind(null);
+    };
+    sinkRef.current = sink;
+    const detach = shown.attachView(sink);
+    return () => { detach(); if (sinkRef.current === sink) sinkRef.current = undefined; };
   }, [shown, mountId]);
 
   // --- D1 notice ----------------------------------------------------------------------------
@@ -145,9 +158,9 @@ export default function EditorPane({
       )}
 
       {state.lostText !== null && !switching && (
-        <section className="lost-banner" role="alert" aria-labelledby="lost-title">
+        <section className="lost-banner" role="alert" aria-labelledby={lostTitleId}>
           <div>
-            <h2 id="lost-title">Your recent edits to {shownPath} were not saved</h2>
+            <h2 id={lostTitleId}>Your recent edits to {shownPath} were not saved</h2>
             <p>The file changed on the server or your lock expired while you were away. The editor now shows the saved version.</p>
           </div>
           <div className="lost-actions">
@@ -185,7 +198,7 @@ export default function EditorPane({
             {/* Keyed by the shown session's path, never the requested one, so Monaco can't cache
                 one file's text under another file's model. */}
             <Editor
-              path={shownPath}
+              path={`pineagent://${paneId}/${shownPath}`}
               defaultValue={state.text}
               theme="pineagent"
               loading={null}
