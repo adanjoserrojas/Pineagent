@@ -58,11 +58,12 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
     if (shell.current) observer.observe(shell.current);
     return () => observer.disconnect();
   }, []);
-  const sideBudget = Math.max(380, available.width - 420);
-  const sideTotal = (layout.filesVisible ? layout.explorer : 0) + (layout.agentsVisible ? layout.agents : 0);
-  const scale = Math.min(1, sideBudget / Math.max(1, sideTotal));
-  const explorerWidth = Math.round(layout.explorer * scale);
-  const agentWidth = Math.round(layout.agents * scale);
+  const sideBudget = Math.max(430, available.width - 420);
+  const sideMinimum = (layout.filesVisible ? 190 : 0) + (layout.agentsVisible ? 240 : 0);
+  const extra = (layout.filesVisible ? Math.max(0, layout.explorer - 190) : 0) + (layout.agentsVisible ? Math.max(0, layout.agents - 240) : 0);
+  const scale = Math.min(1, Math.max(0, sideBudget - sideMinimum) / Math.max(1, extra));
+  const explorerWidth = 190 + Math.round(Math.max(0, layout.explorer - 190) * scale);
+  const agentWidth = 240 + Math.round(Math.max(0, layout.agents - 240) * scale);
   const activityHeight = Math.min(layout.activity, Math.max(90, available.height * 0.4));
   function togglePanel(name: "files" | "agents") {
     const key = name === "files" ? "filesVisible" : "agentsVisible";
@@ -173,7 +174,7 @@ function WorkspaceApp({ wsId, branch }: { wsId: string; branch: string }) {
         <nav className="workspace-rail" aria-label="Workspace panels">
           {(["files", "editor", "agents"] as const).map((name) => (
             <button key={name} type="button" title={name[0].toUpperCase() + name.slice(1)} aria-label={name === "files" ? "Show files" : name === "editor" ? "Show editor" : "Show agents"}
-              aria-pressed={name === "files" ? layout.filesVisible : name === "agents" ? layout.agentsVisible : panel === name}
+              aria-pressed={available.width <= 900 ? panel === name : name === "files" ? layout.filesVisible : name === "agents" ? layout.agentsVisible : panel === name}
               aria-controls={`panel-${name}`} onClick={() => name === "editor" ? showPanel(name) : togglePanel(name)}>
               <WorkspaceIcon name={name} /><span>{name}</span>
             </button>

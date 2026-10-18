@@ -12,9 +12,22 @@ Requirement: implement the selected Crown redesign with square edges, without ch
 - Compact existing plant faces, numbered run steps, approval choices and a bottom composer. Motion respects reduced-motion preferences. No new animation runtime or UI dependency.
 - CLI integration is intentionally untouched. No placeholder terminal commands or simulated live activity were added.
 
+## Workbench corrections
+
+- Drag the borders to resize Explorer, Agents, Activity and the editor split. Focus a divider and use arrows (Shift for larger steps), Home/End, or double-click to reset its size.
+- Collapse Explorer/Agents using their header chevrons, and restore with the left rail. Collapse Activity from its header; restore with the toolbar. Sidebar/activity sizes and visibility persist locally; Reset layout restores defaults.
+- Split right or down into two editor groups. Focus a group before opening a file from Explorer. The same file can be open in both groups, with one FileSession and one lock. Closing the second group flushes/releases only files no longer visible.
+- A narrow editor area automatically stacks the groups; panes stay mounted when switching mobile panels.
+- Individual agent cards collapse while keeping their status and task visible. Approval inputs stay mounted, preserving choices and hint drafts.
+- Keyboard shortcuts: Ctrl/Cmd+B toggles Explorer; Ctrl/Cmd+Alt+B toggles Agents; Ctrl/Cmd+J toggles Activity; Ctrl/Cmd+Backslash splits right.
+- Recursive 1.085 is bundled locally with its OFL license. The UI uses its proportional/casual forms; Monaco uses a measured monospace setting. Font-ready remeasurement keeps caret positioning aligned.
+- Custom SVG/CSS motion adds pineapple leaf movement, opening/closing lock shackles and a real executing-step indicator. All added movement honors reduced motion. Rive MCP reported no open document, so these are not claimed as Rive exports.
+
+UX references: [VS Code custom layout](https://code.visualstudio.com/docs/configure/custom-layout) and [Recursive's official font documentation](https://www.recursive.design/).
+
 ## Scope
 
-Changed: App shell, shared CSS/Monaco colors, editor presentation, RunPanel presentation, UI-only CrownMark/WorkspaceIcon/BranchActivity components, browser regression tests and optional Playwright browser-channel selection.
+Changed: App shell, resizable layout state, editor groups, browser-local FileSession view fan-out and open-file lifecycle, CSS/Monaco typography, run disclosure, SVG motion, browser regression tests and optional Playwright browser-channel selection.
 
 Unchanged: session/lock protocol, REST and Socket.IO contracts, server/backend, authentication, firmware, USB bridge and CLI.
 
@@ -34,11 +47,11 @@ npm run e2e --workspace apps/web -- --workers=2
 
 TypeScript and production build pass. The build retains the existing large Monaco-bundle warning.
 
-Unit result: 90 pass; two filesystem symlink tests fail with Windows EPERM before reaching their assertions. No symlink/security behavior was changed or bypassed.
+Unit result: 92 pass; two filesystem symlink tests fail with Windows EPERM before reaching their assertions. No symlink/security behavior was changed or bypassed.
 
 Browser coverage includes desktop/mobile layout, square corners, file navigation, preserved drafts, reduced motion, lock acquisition/release, simultaneous editors, live updates, reconnect/offline recovery, approvals, pause/resume, run restoration and commit ownership. The mock's push tests use local temporary bare repositories, not GitHub.
 
-Observed browser results: the full 34-test run passed 33 tests; its new offline-emulation test did not establish a disconnected WebSocket. After replacing that setup with a private mock-server restart, all four Crown tests passed in a focused rerun. Thus all 34 scenarios have passing evidence across these runs. The final focused command was `npx playwright test --workers=1 crown.spec.ts` with `PLAYWRIGHT_CHANNEL=msedge`.
+Observed browser results: all 40 tests passed in the final full run (2.8 minutes), with `PLAYWRIGHT_CHANNEL=msedge` and two workers. New coverage includes pointer/keyboard resizing, persisted layout and minimum sidebar widths at 901px, collapse/restore without draft loss, synchronized same-file split views, independent-file lock release, stacked/mobile splits, local Recursive loading, monospace measurements and reduced-motion behavior.
 
 Two existing assertions now accept LF or CRLF without relaxing the expected edited text. The new Crown test waits for Monaco content before typing.
 

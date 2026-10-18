@@ -57,3 +57,21 @@ test("an individual agent run collapses without losing its approval draft", asyn
   await page.getByRole("button", { name: /^Expand run/ }).click();
   await expect(hint).toHaveValue("Keep the existing interface");
 });
+
+test("remembered widths respect minimum sizes at the desktop breakpoint", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("pineagent:crown-layout:v1", JSON.stringify({ explorer: 520, agents: 240 })));
+  await page.setViewportSize({ width: 901, height: 900 });
+  await page.goto(home("alice"));
+  const explorer = page.getByRole("separator", { name: "Resize explorer" });
+  const agents = page.getByRole("separator", { name: "Resize agents" });
+  await expect(explorer).toHaveAttribute("aria-valuenow", "241");
+  await expect(agents).toHaveAttribute("aria-valuenow", "240");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/crown-tablet.png" });
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await expect(explorer).toHaveAttribute("aria-valuenow", "520");
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.getByRole("button", { name: "Show agents" }).click();
+  await expect(page.getByRole("button", { name: "Show agents" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Show files" })).toHaveAttribute("aria-pressed", "false");
+});
