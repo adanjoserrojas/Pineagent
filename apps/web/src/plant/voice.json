@@ -1,8 +1,9 @@
 {
  "voice": "Kevin",
  "elevenlabs": {
-  "voiceId": null,
-  "model": "eleven_multilingual_v2"
+  "voiceId": "cgSgspJ2msm6clMCkdW9",
+  "model": "eleven_multilingual_v2",
+  "name": "Jessica"
  },
  "lines": {
   "planning": "Hmm, let me think.",

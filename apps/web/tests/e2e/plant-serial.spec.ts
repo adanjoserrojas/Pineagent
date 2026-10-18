@@ -92,7 +92,7 @@ test("the robot mirrors the plant's faces, and comes back after an unplug", asyn
     await page.getByLabel("Ask your agent").fill("add a test for currentUser");
     await page.getByRole("button", { name: "Start run" }).click();
     await expect(page.getByTestId("run-state")).toHaveText("done");
-    // Finishing celebrates: "Yay! All done!" (the real Polly clip, served by the app), then the arms wave.
+    // Finishing celebrates: "Yay! All done!" (the real recorded clip, served by the app), then the arms wave.
     await expect.poll(() => robot(page), { timeout: 15_000 }).toContain("SERVO WAVE");
     const sent = await robot(page);
     const done = sent.indexOf("STATE done");
@@ -100,7 +100,7 @@ test("the robot mirrors the plant's faces, and comes back after an unplug", asyn
     expect(order.every((i) => i > 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     const doneLine = sent.slice(done).find((l) => /^SAY [1-9]/.test(l));
-    expect(Number(doneLine?.slice(4))).toBeGreaterThan(48_000 * 1.2); // ~1.6 s at 24 kHz, 2 bytes a sample
+    expect(Number(doneLine?.slice(4))).toBeGreaterThan(48_000 * 0.5); // a real clip: over 0.5 s at 24 kHz, 2 bytes a sample
     await page.screenshot({ path: "test-results/plant-serial.png" });
 
     // With Sound off, Celebrate only waves.
